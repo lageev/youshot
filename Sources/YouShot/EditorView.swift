@@ -60,8 +60,12 @@ struct FloatingAnnotateToolbar: View {
                     watermarkControls
                 case .pen:
                     penControls
+                case .rect:
+                    rectControls
+                case .text:
+                    textControls
                 default:
-                    colorSwatches(index: $controller.strokeColorIndex)
+                    PaletteSwatches(index: $controller.strokeColorIndex, customHex: $controller.strokeCustomHex)
                     miniSlider("粗细", value: $controller.strokeWidth, range: 1...16, width: 80)
                 }
             }
@@ -75,7 +79,7 @@ struct FloatingAnnotateToolbar: View {
     private var penControls: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
-                colorSwatches(index: $controller.strokeColorIndex)
+                PaletteSwatches(index: $controller.strokeColorIndex, customHex: $controller.strokeCustomHex)
                 penBrushPicker
             }
             HStack(spacing: 10) {
@@ -125,32 +129,74 @@ struct FloatingAnnotateToolbar: View {
                     .disabled(controller.watermarkText.trimmingCharacters(in: .whitespaces).isEmpty)
             }
             HStack(spacing: 10) {
-                colorSwatches(index: $controller.watermarkColorIndex)
+                PaletteSwatches(index: $controller.watermarkColorIndex, customHex: $controller.watermarkCustomHex)
                 miniSlider("大小", value: $controller.watermarkFontSize, range: 8...48, width: 72)
                 miniSlider("透明", value: $controller.watermarkOpacity, range: 0.05...1, step: 0.05, percent: true, width: 72)
             }
         }
     }
 
-    private func colorSwatches(index: Binding<Int>) -> some View {
-        HStack(spacing: 7) {
-            ForEach(Array(AnnotationPalette.colors.enumerated()), id: \.offset) { offset, color in
+    @ViewBuilder
+    private var rectControls: some View {
+        HStack(spacing: 12) {
+            shapePicker(
+                selection: $controller.rectShape,
+                items: RectShape.allCases,
+                title: \.title,
+                symbol: \.symbolName
+            )
+            PaletteSwatches(index: $controller.strokeColorIndex, customHex: $controller.strokeCustomHex)
+            miniSlider("粗细", value: $controller.strokeWidth, range: 1...16, width: 80)
+        }
+    }
+
+    @ViewBuilder
+    private var textControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                PaletteSwatches(index: $controller.strokeColorIndex, customHex: $controller.strokeCustomHex)
+                miniSlider("粗细", value: $controller.strokeWidth, range: 1...16, width: 80)
+            }
+            HStack(spacing: 10) {
+                Text("背景")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                shapePicker(
+                    selection: $controller.textBackdrop,
+                    items: TextBackdrop.allCases,
+                    title: \.title,
+                    symbol: \.symbolName
+                )
+                if controller.textBackdrop != .none {
+                    PaletteSwatches(index: $controller.textBackdropColorIndex, customHex: $controller.textBackdropCustomHex)
+                }
+            }
+        }
+    }
+
+    private func shapePicker<Item: Hashable>(
+        selection: Binding<Item>,
+        items: [Item],
+        title: KeyPath<Item, String>,
+        symbol: KeyPath<Item, String>
+    ) -> some View {
+        HStack(spacing: 4) {
+            ForEach(items, id: \.self) { item in
+                let selected = selection.wrappedValue == item
                 Button {
-                    index.wrappedValue = offset
+                    selection.wrappedValue = item
                 } label: {
-                    Circle()
-                        .fill(Color(nsColor: color))
-                        .frame(width: 15, height: 15)
-                        .overlay(Circle().strokeBorder(Color.primary.opacity(0.2), lineWidth: 0.5))
-                        .overlay {
-                            if index.wrappedValue == offset {
-                                Circle()
-                                    .strokeBorder(Color.accentColor, lineWidth: 2)
-                                    .padding(-3)
-                            }
-                        }
+                    Image(systemName: item[keyPath: symbol])
+                        .font(.system(size: 13, weight: .semibold))
+                        .frame(width: 26, height: 24)
+                        .foregroundStyle(selected ? Color.accentColor : Color.primary)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(selected ? Color.accentColor.opacity(0.18) : Color.clear)
+                        )
                 }
                 .buttonStyle(.plain)
+                .help(item[keyPath: title])
             }
         }
     }
@@ -201,7 +247,20 @@ struct FloatingAnnotateToolbar: View {
             )
         }
         .buttonStyle(.plain)
-        .help(item == .pen || item == .line || item == .arrow ? "\(item.title)（按住 ⇧ 画直线）" : item.title)
+        .help(toolHelp(item))
+    }
+
+    private func toolHelp(_ item: EditorTool) -> String {
+        switch item {
+        case .pen, .line, .arrow:
+            return "\(item.title)（按住 ⇧ 画直线）"
+        case .rect:
+            return "\(item.title)（样式条可切椭圆，⇧ 正方形 / 正圆；可拖动调整位置）"
+        case .text:
+            return "\(item.title)（可拖动调整位置）"
+        default:
+            return item.title
+        }
     }
 
     private func iconButton(_ symbol: String, enabled: Bool, action: @escaping () -> Void) -> some View {
@@ -280,6 +339,7 @@ struct AnnotationCanvas: View {
                     }
 
                 highlightLayer(fitted: fitted)
+                placedOverlays(fitted: fitted)
                 previewOverlay(fitted: fitted)
             }
             .frame(width: canvasSize.width, height: canvasSize.height)
@@ -328,11 +388,19 @@ struct AnnotationCanvas: View {
             }
         case .rect:
             if let rect = previewRect(fitted: fitted) {
-                let radius = AnnotationRenderer.rectCornerRadius(for: rect, lineWidth: strokeWidth)
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .strokeBorder(strokeColor, lineWidth: strokeWidth)
-                    .frame(width: rect.width, height: rect.height)
-                    .offset(x: rect.minX, y: rect.minY)
+                let shape = controller.rectShape
+                Group {
+                    if shape == .ellipse {
+                        Ellipse()
+                            .strokeBorder(strokeColor, lineWidth: strokeWidth)
+                    } else {
+                        let radius = AnnotationRenderer.rectCornerRadius(for: rect, lineWidth: strokeWidth)
+                        RoundedRectangle(cornerRadius: radius, style: .continuous)
+                            .strokeBorder(strokeColor, lineWidth: strokeWidth)
+                    }
+                }
+                .frame(width: rect.width, height: rect.height)
+                .offset(x: rect.minX, y: rect.minY)
             }
         case .mosaic, .blur:
             if let rect = previewRect(fitted: fitted) {
@@ -347,6 +415,76 @@ struct AnnotationCanvas: View {
         case .text, .highlight, .watermark:
             EmptyView()
         }
+    }
+
+    /// 已放置的圆角矩形 / 椭圆 / 文字，尚未合入底图。
+    @ViewBuilder
+    private func placedOverlays(fitted: CGRect) -> some View {
+        ForEach(controller.overlays) { item in
+            placedOverlay(item, fitted: fitted)
+        }
+        .allowsHitTesting(false)
+    }
+
+    @ViewBuilder
+    private func placedOverlay(_ item: OverlayItem, fitted: CGRect) -> some View {
+        switch item.kind {
+        case .roundedRect, .ellipse:
+            if let rect = toViewRect(item.frame, fitted: fitted) {
+                let lineWidth = viewLength(item.lineWidth, fitted: fitted)
+                Group {
+                    if item.kind == .ellipse {
+                        Ellipse().strokeBorder(Color(nsColor: item.color), lineWidth: lineWidth)
+                    } else {
+                        let radius = AnnotationRenderer.rectCornerRadius(for: rect, lineWidth: lineWidth)
+                        RoundedRectangle(cornerRadius: radius, style: .continuous)
+                            .strokeBorder(Color(nsColor: item.color), lineWidth: lineWidth)
+                    }
+                }
+                .frame(width: rect.width, height: rect.height)
+                .offset(x: rect.minX, y: rect.minY)
+            }
+        case .text:
+            if let wrap = toViewRect(item.visualRect(), fitted: fitted),
+               let textOrigin = toView(item.frame.origin, fitted: fitted) {
+                placedText(item, wrap: wrap, textOrigin: textOrigin, fitted: fitted)
+            }
+        }
+    }
+
+    private func placedText(_ item: OverlayItem, wrap: CGRect, textOrigin: CGPoint, fitted: CGRect) -> some View {
+        let fontSize = viewLength(item.fontSize, fitted: fitted)
+        return ZStack(alignment: .topLeading) {
+            placedTextBackdrop(item, fitted: fitted)
+            Text(item.text)
+                .font(.system(size: max(8, fontSize), weight: .bold))
+                .foregroundStyle(Color(nsColor: item.color))
+                .offset(x: textOrigin.x - wrap.minX, y: textOrigin.y - wrap.minY)
+        }
+        .frame(width: wrap.width, height: wrap.height, alignment: .topLeading)
+        .offset(x: wrap.minX, y: wrap.minY)
+    }
+
+    @ViewBuilder
+    private func placedTextBackdrop(_ item: OverlayItem, fitted: CGRect) -> some View {
+        let color = Color(nsColor: item.backdropColor)
+        let radius = viewLength(
+            item.backdrop.cornerRadius(for: item.visualRect(), fontSize: item.fontSize),
+            fitted: fitted
+        )
+        switch item.backdrop {
+        case .none:
+            Color.clear
+        case .circle:
+            Ellipse().fill(color)
+        case .rounded, .capsule, .banner:
+            RoundedRectangle(cornerRadius: radius, style: .continuous).fill(color)
+        }
+    }
+
+    private func viewLength(_ pixels: CGFloat, fitted: CGRect) -> CGFloat {
+        guard let cg = image.youshotCGImage, cg.width > 0 else { return pixels }
+        return pixels * fitted.width / CGFloat(cg.width)
     }
 
     /// 所有高亮区域共用一层遮罩，透明度跟着设置实时变化，重叠也不会加深。
@@ -402,13 +540,24 @@ struct AnnotationCanvas: View {
     private func dragGesture(fitted: CGRect) -> some Gesture {
         DragGesture(minimumDistance: tool == .text ? 0 : 2)
             .onChanged { value in
-                if tool == .text || tool == .watermark { return }
+                if tool == .watermark { return }
+                if drag.movingID != nil {
+                    updateMove(to: value.location, fitted: fitted)
+                    return
+                }
+                if drag.start == nil, let item = hitOverlay(at: value.startLocation, fitted: fitted) {
+                    drag.movingID = item.id
+                    drag.moveStartOrigin = item.frame.origin
+                    drag.start = value.startLocation
+                    return
+                }
+                if tool == .text { return }
                 if drag.start == nil {
                     drag.start = value.startLocation
                     drag.points = [value.startLocation]
                 }
                 let start = drag.start ?? value.startLocation
-                let current = straightLockedEnd(from: start, to: value.location)
+                let current = lockedDragEnd(from: start, to: value.location)
                 drag.current = current
                 if tool == .pen {
                     if Self.shiftHeld {
@@ -419,6 +568,13 @@ struct AnnotationCanvas: View {
                 }
             }
             .onEnded { value in
+                if drag.movingID != nil {
+                    if drag.moved {
+                        controller.finishMoveOverlay()
+                    }
+                    drag.reset()
+                    return
+                }
                 if tool == .text {
                     if let pixel = toPixel(value.startLocation, fitted: fitted) {
                         controller.beginTextInput(at: pixel)
@@ -428,7 +584,7 @@ struct AnnotationCanvas: View {
                 }
 
                 let start = drag.start ?? value.startLocation
-                let end = straightLockedEnd(from: start, to: value.location)
+                let end = lockedDragEnd(from: start, to: value.location)
                 let points = Self.shiftHeld ? [start, end] : drag.points
                 drag.reset()
 
@@ -460,9 +616,55 @@ struct AnnotationCanvas: View {
             }
     }
 
-    /// 按住 ⇧ 时，画笔 / 直线 / 箭头吸附到水平、垂直或 45°。
-    private func straightLockedEnd(from start: CGPoint, to current: CGPoint) -> CGPoint {
-        guard Self.shiftHeld, tool == .pen || tool == .line || tool == .arrow else { return current }
+    private func hitOverlay(at point: CGPoint, fitted: CGRect) -> OverlayItem? {
+        for item in controller.overlays.reversed() {
+            guard let rect = toViewRect(item.visualRect(), fitted: fitted) else { continue }
+            let padded = rect.insetBy(dx: -6, dy: -6)
+            if item.kind == .ellipse {
+                if ellipseContains(point, in: padded) { return item }
+            } else if padded.contains(point) {
+                return item
+            }
+        }
+        return nil
+    }
+
+    private func ellipseContains(_ point: CGPoint, in rect: CGRect) -> Bool {
+        guard rect.width > 1, rect.height > 1 else { return false }
+        let dx = (point.x - rect.midX) / (rect.width / 2)
+        let dy = (point.y - rect.midY) / (rect.height / 2)
+        return dx * dx + dy * dy <= 1
+    }
+
+    private func updateMove(to location: CGPoint, fitted: CGRect) {
+        guard let id = drag.movingID, let start = drag.start, let cg = image.youshotCGImage else { return }
+        let viewDelta = CGSize(width: location.x - start.x, height: location.y - start.y)
+        if !drag.moved, hypot(viewDelta.width, viewDelta.height) > 2 {
+            controller.beginMoveOverlay()
+            drag.moved = true
+        }
+        guard drag.moved else { return }
+        let origin = CGPoint(
+            x: drag.moveStartOrigin.x + viewDelta.width * CGFloat(cg.width) / fitted.width,
+            y: drag.moveStartOrigin.y + viewDelta.height * CGFloat(cg.height) / fitted.height
+        )
+        controller.moveOverlay(id: id, origin: origin)
+    }
+
+    /// 按住 ⇧：画笔 / 直线 / 箭头锁 45°；矩形锁正方形，椭圆锁正圆。
+    private func lockedDragEnd(from start: CGPoint, to current: CGPoint) -> CGPoint {
+        guard Self.shiftHeld else { return current }
+        if tool == .rect {
+            let dx = current.x - start.x
+            let dy = current.y - start.y
+            let side = max(abs(dx), abs(dy))
+            guard side > 0 else { return current }
+            return CGPoint(
+                x: start.x + (dx < 0 ? -side : side),
+                y: start.y + (dy < 0 ? -side : side)
+            )
+        }
+        guard tool == .pen || tool == .line || tool == .arrow else { return current }
         let dx = current.x - start.x
         let dy = current.y - start.y
         let length = hypot(dx, dy)
@@ -543,22 +745,32 @@ private struct InlineTextField: View {
         .system(size: controller.annotationFontSize, weight: .bold)
     }
 
-    /// 输入框宽度跟随内容增长，不再一路顶到画布边缘
-    private var width: CGFloat {
+    private var textSize: CGSize {
         let size = controller.annotationFontSize
         let text = controller.textDraft.isEmpty ? Self.placeholder : controller.textDraft
-        let measured = (text as NSString).size(
-            withAttributes: [.font: NSFont.boldSystemFont(ofSize: size)]
-        ).width
-        return min(available, measured + size)
+        return (text as NSString).size(withAttributes: [.font: NSFont.boldSystemFont(ofSize: size)])
+    }
+
+    private var wrap: CGRect {
+        let rect = CGRect(
+            origin: .zero,
+            size: CGSize(width: max(textSize.width, 8), height: max(textSize.height, controller.annotationFontSize))
+        )
+        if controller.textBackdrop == .none {
+            return rect.insetBy(dx: -8, dy: -5)
+        }
+        return controller.textBackdrop.wrapRect(textRect: rect, fontSize: controller.annotationFontSize)
     }
 
     var body: some View {
-        ZStack(alignment: .leading) {
+        let box = wrap
+        let padX = -box.minX
+        let padY = -box.minY
+        ZStack(alignment: .topLeading) {
             if controller.textDraft.isEmpty {
                 Text(Self.placeholder)
                     .font(font)
-                    .foregroundStyle(Color.white.opacity(0.75))
+                    .foregroundStyle(Color(nsColor: controller.annotationColor).opacity(0.45))
             }
             TextField("", text: $controller.textDraft)
                 .textFieldStyle(.plain)
@@ -566,17 +778,139 @@ private struct InlineTextField: View {
                 .foregroundStyle(Color(nsColor: controller.annotationColor))
                 .focused($focused)
         }
-        .frame(width: width, alignment: .leading)
-        .padding(.horizontal, 3)
-        .background(Color.black.opacity(0.3))
+        .padding(.leading, padX)
+        .padding(.trailing, box.width - padX - textSize.width)
+        .padding(.top, padY)
+        .padding(.bottom, box.height - padY - textSize.height)
+        .frame(width: min(available, box.width), height: box.height, alignment: .center)
+        .background { textInputBackdrop(box: box) }
         .overlay {
-            Rectangle()
-                .strokeBorder(Color(nsColor: controller.annotationColor).opacity(0.8), lineWidth: 1)
+            RoundedRectangle(
+                cornerRadius: controller.textBackdrop == .none
+                    ? 8
+                    : controller.textBackdrop.cornerRadius(for: box, fontSize: controller.annotationFontSize),
+                style: .continuous
+            )
+            .strokeBorder(Color(nsColor: controller.annotationColor).opacity(0.85), lineWidth: 1)
         }
-        .offset(x: origin.x, y: origin.y - 2)
+        .offset(x: origin.x + box.minX, y: origin.y + box.minY - 2)
         .onSubmit { controller.confirmTextInput() }
         .onExitCommand { controller.cancelTextInput() }
         .onAppear { focused = true }
+    }
+
+    @ViewBuilder
+    private func textInputBackdrop(box: CGRect) -> some View {
+        let color = Color(nsColor: controller.textBackdropColor)
+        let radius = controller.textBackdrop.cornerRadius(for: box, fontSize: controller.annotationFontSize)
+        switch controller.textBackdrop {
+        case .none:
+            Color.clear
+        case .circle:
+            Ellipse().fill(color)
+        case .rounded, .capsule, .banner:
+            RoundedRectangle(cornerRadius: radius, style: .continuous).fill(color)
+        }
+    }
+}
+
+struct PaletteSwatches: View {
+    @Binding var index: Int
+    @Binding var customHex: String
+    var swatchSize: CGFloat = 15
+
+    var body: some View {
+        HStack(spacing: 7) {
+            ForEach(Array(AnnotationPalette.colors.enumerated()), id: \.offset) { offset, color in
+                Button {
+                    index = offset
+                } label: {
+                    Circle()
+                        .fill(Color(nsColor: color))
+                        .frame(width: swatchSize, height: swatchSize)
+                        .overlay(Circle().strokeBorder(Color.primary.opacity(0.2), lineWidth: 0.5))
+                        .overlay {
+                            if index == offset {
+                                Circle()
+                                    .strokeBorder(Color.accentColor, lineWidth: 2)
+                                    .padding(-3)
+                            }
+                        }
+                }
+                .buttonStyle(.plain)
+            }
+
+            customSwatch
+                .help("自定义颜色")
+        }
+    }
+
+    private var customSwatch: some View {
+        Button {
+            index = AnnotationPalette.customIndex
+            CustomColorPanel.shared.show(hex: customHex) { hex in
+                customHex = hex
+                index = AnnotationPalette.customIndex
+            }
+        } label: {
+            Circle()
+                .fill(Color(nsColor: AnnotationPalette.color(fromHex: customHex) ?? .systemRed))
+                .frame(width: swatchSize, height: swatchSize)
+                .overlay {
+                    Circle().strokeBorder(rainbow, lineWidth: 1.2)
+                }
+                .overlay {
+                    if index >= AnnotationPalette.customIndex {
+                        Circle()
+                            .strokeBorder(rainbow, lineWidth: 2)
+                            .padding(-3)
+                    }
+                }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var rainbow: AngularGradient {
+        AngularGradient(
+            colors: [.red, .orange, .yellow, .green, .cyan, .blue, .purple, .pink, .red],
+            center: .center
+        )
+    }
+}
+
+@MainActor
+final class CustomColorPanel: NSObject {
+    static let shared = CustomColorPanel()
+    private var onChange: ((String) -> Void)?
+
+    func show(hex: String, onChange: @escaping (String) -> Void) {
+        self.onChange = onChange
+        let panel = NSColorPanel.shared
+        panel.color = AnnotationPalette.color(fromHex: hex) ?? .systemRed
+        panel.showsAlpha = false
+        panel.mode = .RGB
+        panel.isContinuous = true
+        panel.hidesOnDeactivate = false
+        panel.setTarget(self)
+        panel.setAction(#selector(colorChanged(_:)))
+        let overlayLevel = NSWindow.Level.screenSaver.rawValue
+        panel.level = AnnotationOverlay.shared.isPresented
+            ? NSWindow.Level(rawValue: overlayLevel + 2)
+            : .floating
+        panel.makeKeyAndOrderFront(nil)
+        panel.orderFrontRegardless()
+    }
+
+    func close() {
+        let panel = NSColorPanel.shared
+        panel.close()
+        panel.setTarget(nil)
+        panel.setAction(nil)
+        onChange = nil
+    }
+
+    @objc private func colorChanged(_ sender: NSColorPanel) {
+        onChange?(AnnotationPalette.hex(from: sender.color))
     }
 }
 
@@ -585,10 +919,16 @@ private final class DragState: ObservableObject {
     @Published var start: CGPoint?
     @Published var current: CGPoint?
     @Published var points: [CGPoint] = []
+    var movingID: UUID?
+    var moveStartOrigin: CGPoint = .zero
+    var moved = false
 
     func reset() {
         start = nil
         current = nil
         points = []
+        movingID = nil
+        moveStartOrigin = .zero
+        moved = false
     }
 }

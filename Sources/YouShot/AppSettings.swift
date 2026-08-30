@@ -8,13 +8,19 @@ enum AppSettings {
     private static let exportShadowBlurKey = "settings.exportShadowBlur"
     private static let exportShadowOpacityKey = "settings.exportShadowOpacity"
     private static let strokeColorKey = "settings.strokeColorIndex"
+    private static let strokeCustomHexKey = "settings.strokeCustomHex"
     private static let strokeWidthKey = "settings.strokeWidth"
+    private static let rectShapeKey = "settings.rectShape"
+    private static let textBackdropKey = "settings.textBackdrop"
+    private static let textBackdropColorKey = "settings.textBackdropColorIndex"
+    private static let textBackdropCustomHexKey = "settings.textBackdropCustomHex"
     private static let penBrushKey = "settings.penBrush"
     private static let strokeOpacityKey = "settings.strokeOpacity"
     private static let highlightDimKey = "settings.highlightDim"
     private static let watermarkTextKey = "settings.watermarkText"
     private static let watermarkStyleKey = "settings.watermarkStyle"
     private static let watermarkColorKey = "settings.watermarkColorIndex"
+    private static let watermarkCustomHexKey = "settings.watermarkCustomHex"
     private static let watermarkSizeKey = "settings.watermarkFontSize"
     private static let watermarkOpacityKey = "settings.watermarkOpacity"
 
@@ -71,6 +77,11 @@ enum AppSettings {
         set { UserDefaults.standard.set(newValue, forKey: strokeColorKey) }
     }
 
+    static var strokeCustomHex: String {
+        get { UserDefaults.standard.string(forKey: strokeCustomHexKey) ?? "FF3B30" }
+        set { UserDefaults.standard.set(newValue, forKey: strokeCustomHexKey) }
+    }
+
     /// 线条粗细，单位为点
     static var strokeWidth: Double {
         get {
@@ -94,6 +105,32 @@ enum AppSettings {
             return value ?? 1
         }
         set { UserDefaults.standard.set(newValue, forKey: strokeOpacityKey) }
+    }
+
+    static var rectShape: RectShape {
+        get {
+            let raw = UserDefaults.standard.string(forKey: rectShapeKey) ?? ""
+            return RectShape(rawValue: raw) ?? .rounded
+        }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: rectShapeKey) }
+    }
+
+    static var textBackdrop: TextBackdrop {
+        get {
+            let raw = UserDefaults.standard.string(forKey: textBackdropKey) ?? ""
+            return TextBackdrop(rawValue: raw) ?? .none
+        }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: textBackdropKey) }
+    }
+
+    static var textBackdropColorIndex: Int {
+        get { UserDefaults.standard.object(forKey: textBackdropColorKey) as? Int ?? 6 }
+        set { UserDefaults.standard.set(newValue, forKey: textBackdropColorKey) }
+    }
+
+    static var textBackdropCustomHex: String {
+        get { UserDefaults.standard.string(forKey: textBackdropCustomHexKey) ?? "FFFFFF" }
+        set { UserDefaults.standard.set(newValue, forKey: textBackdropCustomHexKey) }
     }
 
     static var highlightDim: Double {
@@ -120,6 +157,11 @@ enum AppSettings {
     static var watermarkColorIndex: Int {
         get { UserDefaults.standard.object(forKey: watermarkColorKey) as? Int ?? 6 }
         set { UserDefaults.standard.set(newValue, forKey: watermarkColorKey) }
+    }
+
+    static var watermarkCustomHex: String {
+        get { UserDefaults.standard.string(forKey: watermarkCustomHexKey) ?? "FFFFFF" }
+        set { UserDefaults.standard.set(newValue, forKey: watermarkCustomHexKey) }
     }
 
     static var watermarkFontSize: Double {

@@ -204,7 +204,7 @@ struct ContentView: View {
         section("画笔样式") {
             settingsGroup {
                 settingsRow("颜色") {
-                    colorRow(index: $controller.strokeColorIndex)
+                    PaletteSwatches(index: $controller.strokeColorIndex, customHex: $controller.strokeCustomHex, swatchSize: 16)
                 }
                 rowDivider
                 settingsRow("粗细") {
@@ -222,7 +222,41 @@ struct ContentView: View {
                     compactSlider(value: $controller.strokeOpacity, range: 0.05...1, step: 0.05, percent: true)
                 }
             }
-            footnote("矩形、直线、箭头、文字共用颜色与粗细。笔刷与透明度仅用于画笔；荧光笔为正片叠底，配合半透明可手绘高亮。")
+            footnote("矩形、直线、箭头、文字共用颜色与粗细，最右侧可自定义颜色。笔刷与透明度仅用于画笔；荧光笔为正片叠底，配合半透明可手绘高亮。")
+        }
+
+        section("矩形") {
+            settingsGroup {
+                settingsRow("形状") {
+                    pillPicker(
+                        selection: $controller.rectShape,
+                        options: RectShape.allCases.map { ($0, $0.title) }
+                    )
+                }
+            }
+            footnote("椭圆模式下按住 ⇧ 画正圆；圆角矩形按住 ⇧ 画正方形。")
+        }
+
+        section("文字") {
+            settingsGroup {
+                settingsRow("背景") {
+                    pillPicker(
+                        selection: $controller.textBackdrop,
+                        options: TextBackdrop.allCases.map { ($0, $0.title) }
+                    )
+                }
+                if controller.textBackdrop != .none {
+                    rowDivider
+                    settingsRow("背景色") {
+                        PaletteSwatches(
+                            index: $controller.textBackdropColorIndex,
+                            customHex: $controller.textBackdropCustomHex,
+                            swatchSize: 16
+                        )
+                    }
+                }
+            }
+            footnote("输入框为无填充圆角描边；选定背景后，确认文字时一并画上。")
         }
 
         section("高亮") {
@@ -258,7 +292,7 @@ struct ContentView: View {
                     .padding(.vertical, 11)
                 rowDivider
                 settingsRow("颜色") {
-                    colorRow(index: $controller.watermarkColorIndex)
+                    PaletteSwatches(index: $controller.watermarkColorIndex, customHex: $controller.watermarkCustomHex, swatchSize: 16)
                 }
                 rowDivider
                 settingsRow("大小") {
@@ -529,29 +563,6 @@ struct ContentView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color.primary.opacity(0.06))
         )
-    }
-
-    private func colorRow(index: Binding<Int>) -> some View {
-        HStack(spacing: 7) {
-            ForEach(Array(AnnotationPalette.colors.enumerated()), id: \.offset) { offset, color in
-                Button {
-                    index.wrappedValue = offset
-                } label: {
-                    Circle()
-                        .fill(Color(nsColor: color))
-                        .frame(width: 16, height: 16)
-                        .overlay(Circle().strokeBorder(Color.primary.opacity(0.18), lineWidth: 0.5))
-                        .overlay {
-                            if index.wrappedValue == offset {
-                                Circle()
-                                    .strokeBorder(Color.accentColor, lineWidth: 2)
-                                    .padding(-2.5)
-                            }
-                        }
-                }
-                .buttonStyle(.plain)
-            }
-        }
     }
 
     private func compactSlider(

@@ -41,8 +41,23 @@ final class CaptureController: ObservableObject {
     @Published var strokeColorIndex: Int = AppSettings.strokeColorIndex {
         didSet { AppSettings.strokeColorIndex = strokeColorIndex }
     }
+    @Published var strokeCustomHex: String = AppSettings.strokeCustomHex {
+        didSet { AppSettings.strokeCustomHex = strokeCustomHex }
+    }
     @Published var strokeWidth: Double = AppSettings.strokeWidth {
         didSet { AppSettings.strokeWidth = strokeWidth }
+    }
+    @Published var rectShape: RectShape = AppSettings.rectShape {
+        didSet { AppSettings.rectShape = rectShape }
+    }
+    @Published var textBackdrop: TextBackdrop = AppSettings.textBackdrop {
+        didSet { AppSettings.textBackdrop = textBackdrop }
+    }
+    @Published var textBackdropColorIndex: Int = AppSettings.textBackdropColorIndex {
+        didSet { AppSettings.textBackdropColorIndex = textBackdropColorIndex }
+    }
+    @Published var textBackdropCustomHex: String = AppSettings.textBackdropCustomHex {
+        didSet { AppSettings.textBackdropCustomHex = textBackdropCustomHex }
     }
     @Published var penBrush: PenBrush = AppSettings.penBrush {
         didSet { AppSettings.penBrush = penBrush }
@@ -61,6 +76,9 @@ final class CaptureController: ObservableObject {
     }
     @Published var watermarkColorIndex: Int = AppSettings.watermarkColorIndex {
         didSet { AppSettings.watermarkColorIndex = watermarkColorIndex }
+    }
+    @Published var watermarkCustomHex: String = AppSettings.watermarkCustomHex {
+        didSet { AppSettings.watermarkCustomHex = watermarkCustomHex }
     }
     @Published var watermarkFontSize: Double = AppSettings.watermarkFontSize {
         didSet { AppSettings.watermarkFontSize = watermarkFontSize }
@@ -95,6 +113,8 @@ final class CaptureController: ObservableObject {
     @Published var overlayResizing = false
     /// 高亮区域（截图像素坐标），共用一层遮罩，导出时才合入图片
     @Published var highlightRects: [CGRect] = []
+    /// 圆角矩形 / 椭圆 / 文字：先叠在画布上，可拖动，导出时才合入图片
+    @Published var overlays: [OverlayItem] = []
     @Published var overlayToast: String?
     var overlayResizeOrigin: CGRect?
 
@@ -119,7 +139,11 @@ final class CaptureController: ObservableObject {
         )
     }
 
-    var annotationColor: NSColor { AnnotationPalette.color(at: strokeColorIndex) }
+    var annotationColor: NSColor { AnnotationPalette.resolved(index: strokeColorIndex, customHex: strokeCustomHex) }
+
+    var textBackdropColor: NSColor {
+        AnnotationPalette.resolved(index: textBackdropColorIndex, customHex: textBackdropCustomHex)
+    }
 
     /// 文字标注字号（点），跟随粗细变化
     var annotationFontSize: Double { strokeWidth * 6 }
@@ -258,9 +282,12 @@ final class CaptureController: ObservableObject {
     // MARK: - Editor
 
     func applyRect(pixelRect: CGRect) {
-        let color = annotationColor
-        let width = strokePixelWidth
-        commitEdit { AnnotationRenderer.drawRect(on: $0, rect: pixelRect, color: color, lineWidth: width) }
+        let kind: OverlayItem.OverlayKind = rectShape == .ellipse ? .ellipse : .roundedRect
+        pushHistory()
+        overlays.append(
+            .shape(kind, frame: pixelRect, color: annotationColor, lineWidth: strokePixelWidth)
+        )
+        persistEditorImage()
     }
 
     func applyLine(from: CGPoint, to: CGPoint) {
@@ -298,7 +325,7 @@ final class CaptureController: ObservableObject {
         let style = watermarkStyle
         let scale = editorPixelScale.width
         let fontSize = CGFloat(watermarkFontSize) * scale
-        let color = AnnotationPalette.color(at: watermarkColorIndex)
+        let color = AnnotationPalette.resolved(index: watermarkColorIndex, customHex: watermarkCustomHex)
         let opacity = CGFloat(watermarkOpacity)
         commitEdit {
             AnnotationRenderer.drawWatermark(
@@ -324,16 +351,40 @@ final class CaptureController: ObservableObject {
 
     func confirmTextInput() {
         if let point = pendingTextPoint {
-            let text = textDraft
-            let color = annotationColor
-            let size = strokePixelWidth * 6
-            commitEdit {
-                AnnotationRenderer.drawText(on: $0, text: text, at: point, color: color, fontSize: size)
+            let text = textDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty {
+                pushHistory()
+                overlays.append(
+                    .text(
+                        at: point,
+                        text: text,
+                        color: annotationColor,
+                        fontSize: strokePixelWidth * 6,
+                        backdrop: textBackdrop,
+                        backdropColor: textBackdropColor
+                    )
+                )
+                persistEditorImage()
             }
         }
         showTextInput = false
         pendingTextPoint = nil
         textDraft = ""
+    }
+
+    func beginMoveOverlay() {
+        pushHistory()
+    }
+
+    func moveOverlay(id: UUID, origin: CGPoint) {
+        guard let index = overlays.firstIndex(where: { $0.id == id }) else { return }
+        var items = overlays
+        items[index].frame.origin = origin
+        overlays = items
+    }
+
+    func finishMoveOverlay() {
+        persistEditorImage()
     }
 
     func cancelTextInput() {
@@ -366,13 +417,13 @@ final class CaptureController: ObservableObject {
 
     func undoEditor() {
         guard let current = editorImage, let previous = editorUndoStack.popLast() else { return }
-        editorRedoStack.append(EditorSnapshot(image: current, highlights: highlightRects))
+        editorRedoStack.append(EditorSnapshot(image: current, highlights: highlightRects, overlays: overlays))
         restore(previous)
     }
 
     func redoEditor() {
         guard let current = editorImage, let next = editorRedoStack.popLast() else { return }
-        editorUndoStack.append(EditorSnapshot(image: current, highlights: highlightRects))
+        editorUndoStack.append(EditorSnapshot(image: current, highlights: highlightRects, overlays: overlays))
         restore(next)
     }
 
@@ -411,6 +462,7 @@ final class CaptureController: ObservableObject {
         if let base = editorBaseImage {
             editorImage = base
             highlightRects.removeAll()
+            overlays.removeAll()
             persistEditorImage()
         }
         closeEditor()
@@ -431,6 +483,7 @@ final class CaptureController: ObservableObject {
         overlayResizing = false
         overlayResizeOrigin = nil
         highlightRects.removeAll()
+        overlays.removeAll()
         cancelTextInput()
         editorUndoStack.removeAll()
         editorRedoStack.removeAll()
@@ -477,7 +530,7 @@ final class CaptureController: ObservableObject {
 
     private func pushHistory() {
         guard let image = editorImage else { return }
-        editorUndoStack.append(EditorSnapshot(image: image, highlights: highlightRects))
+        editorUndoStack.append(EditorSnapshot(image: image, highlights: highlightRects, overlays: overlays))
         editorRedoStack.removeAll()
         canUndoEditor = true
         canRedoEditor = false
@@ -486,19 +539,26 @@ final class CaptureController: ObservableObject {
     private func restore(_ snapshot: EditorSnapshot) {
         editorImage = snapshot.image
         highlightRects = snapshot.highlights
+        overlays = snapshot.overlays
         canUndoEditor = !editorUndoStack.isEmpty
         canRedoEditor = !editorRedoStack.isEmpty
         persistEditorImage()
     }
 
-    /// 把高亮遮罩层合入图片
+    /// 把高亮遮罩与可拖动标注合入图片
     private func flattened(_ image: CGImage) -> CGImage {
-        guard !highlightRects.isEmpty else { return image }
-        return AnnotationRenderer.drawHighlight(
-            on: image,
-            rects: highlightRects,
-            dim: CGFloat(highlightDim)
-        ) ?? image
+        var result = image
+        if !highlightRects.isEmpty {
+            result = AnnotationRenderer.drawHighlight(
+                on: result,
+                rects: highlightRects,
+                dim: CGFloat(highlightDim)
+            ) ?? result
+        }
+        for item in overlays {
+            result = item.draw(on: result) ?? result
+        }
+        return result
     }
 
     private func flashToast(_ text: String) {
@@ -568,6 +628,7 @@ final class CaptureController: ObservableObject {
         canUndoEditor = false
         canRedoEditor = false
         highlightRects.removeAll()
+        overlays.removeAll()
         editorBaseImage = image
         editorImage = image
         persistEditorImage()
@@ -586,6 +647,7 @@ final class CaptureController: ObservableObject {
         canUndoEditor = false
         canRedoEditor = false
         highlightRects.removeAll()
+        overlays.removeAll()
         editorBaseImage = image
         editorImage = image
         editorURL = url
@@ -946,10 +1008,11 @@ final class CaptureController: ObservableObject {
     }
 }
 
-/// 撤销/重做的一步：图片内容 + 高亮遮罩
+/// 撤销/重做的一步：图片内容 + 高亮遮罩 + 可拖动标注
 private struct EditorSnapshot {
     let image: NSImage
     let highlights: [CGRect]
+    let overlays: [OverlayItem]
 }
 
 private struct CaptureResult {

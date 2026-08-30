@@ -70,7 +70,10 @@ final class AnnotationOverlay {
         panel = created
     }
 
+    var isPresented: Bool { panel != nil }
+
     func dismiss() {
+        CustomColorPanel.shared.close()
         panel?.captureController = nil
         panel?.orderOut(nil)
         panel = nil
