@@ -1,0 +1,429 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 54;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		3AA1C8B4B8ABA70187FD50CE /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B840D5A9684C349673CF7BB /* AppSettings.swift */; };
+		587793D4415D91E5A816FC42 /* HotKeyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D6F67AD89687543646C4A72 /* HotKeyManager.swift */; };
+		594F6F24B7DAE453D9CB6DD5 /* EditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9E81108147F2DADCA2A4629 /* EditorView.swift */; };
+		5A3CF092285413285DD6F13D /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A138F5012F151768C83791E /* ContentView.swift */; };
+		5D7BF1E97FD9C3B5EB01F0D1 /* AnnotationOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A7304817806854AF860B3D6 /* AnnotationOverlay.swift */; };
+		6C00A713EC1BC2D55A37EDC9 /* YouShotApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FCEFC6BACFDAB35F69A592D /* YouShotApp.swift */; };
+		7339E9A522B52A3628639472 /* KeyChord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70EB996B687D0CA04C991D0A /* KeyChord.swift */; };
+		7B2CBADC1CFF77F8F8E74551 /* CaptureMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = B322A53FE50B0372C2B83EB2 /* CaptureMode.swift */; };
+		7BB6FCC135C6EC4CAB97C025 /* AnnotationRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62A181522D12AFE59ABDF474 /* AnnotationRenderer.swift */; };
+		8EBE6986BCDF90463E2486DA /* RegionSelector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A371D06C2F7764073A72D5D2 /* RegionSelector.swift */; };
+		A7E97ED096106C664443292C /* CaptureController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B004CAA54686638938D1487F /* CaptureController.swift */; };
+		C4E8A91F2B7D4E0A9F31C6D2 /* youshot.icon in Resources */ = {isa = PBXBuildFile; fileRef = 5E3385CEDEC48309B9E7F709 /* youshot.icon */; };
+		DC45405304E4D7009A20FC40 /* MenuBarIcon.png in Resources */ = {isa = PBXBuildFile; fileRef = 97E0F7CCA4FBE2F8F9CAA83D /* MenuBarIcon.png */; };
+		E53FE3427A2CD933FA96E1DA /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BE4430939620554F39BBB361 /* Cocoa.framework */; };
+		F60397456D4919AEB30B3F0A /* ImageMosaic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0FB5BB4B416253D08D8BD9 /* ImageMosaic.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		08BC21285CD1649F7869E198 /* AGENTS.md */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = net.daringfireball.markdown; path = AGENTS.md; sourceTree = "<group>"; };
+		0F0C18AF88FA5C7D5562D681 /* MenuBarIcon.svg */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xml; path = MenuBarIcon.svg; sourceTree = "<group>"; };
+		0F0FB5BB4B416253D08D8BD9 /* ImageMosaic.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ImageMosaic.swift; sourceTree = "<group>"; };
+		1D6F67AD89687543646C4A72 /* HotKeyManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HotKeyManager.swift; sourceTree = "<group>"; };
+		41ECB0DCA027CB9DD4EF0C3F /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		5E3385CEDEC48309B9E7F709 /* youshot.icon */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.iconcomposer.icon; path = youshot.icon; sourceTree = "<group>"; };
+		62A181522D12AFE59ABDF474 /* AnnotationRenderer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AnnotationRenderer.swift; sourceTree = "<group>"; };
+		70EB996B687D0CA04C991D0A /* KeyChord.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KeyChord.swift; sourceTree = "<group>"; };
+		7A7304817806854AF860B3D6 /* AnnotationOverlay.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AnnotationOverlay.swift; sourceTree = "<group>"; };
+		880141A456091751F6B8FDF4 /* YouShot.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = YouShot.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		8B840D5A9684C349673CF7BB /* AppSettings.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
+		8FCEFC6BACFDAB35F69A592D /* YouShotApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = YouShotApp.swift; sourceTree = "<group>"; };
+		97E0F7CCA4FBE2F8F9CAA83D /* MenuBarIcon.png */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = image.png; path = MenuBarIcon.png; sourceTree = "<group>"; };
+		9A138F5012F151768C83791E /* ContentView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		A371D06C2F7764073A72D5D2 /* RegionSelector.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RegionSelector.swift; sourceTree = "<group>"; };
+		AA17C528780748EC5BA4ACD2 /* Package.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Package.swift; sourceTree = "<group>"; };
+		B004CAA54686638938D1487F /* CaptureController.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CaptureController.swift; sourceTree = "<group>"; };
+		B322A53FE50B0372C2B83EB2 /* CaptureMode.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CaptureMode.swift; sourceTree = "<group>"; };
+		B9E81108147F2DADCA2A4629 /* EditorView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EditorView.swift; sourceTree = "<group>"; };
+		BE4430939620554F39BBB361 /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.0.sdk/System/Library/Frameworks/Cocoa.framework; sourceTree = DEVELOPER_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		6E79B5AA8C5D9779202B9ED0 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E53FE3427A2CD933FA96E1DA /* Cocoa.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		2C19EC656F6D586E884BE948 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				41ECB0DCA027CB9DD4EF0C3F /* Info.plist */,
+				97E0F7CCA4FBE2F8F9CAA83D /* MenuBarIcon.png */,
+				0F0C18AF88FA5C7D5562D681 /* MenuBarIcon.svg */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		41C66CAE8F6D2507EDF8ECB3 /* YouShot */ = {
+			isa = PBXGroup;
+			children = (
+				7A7304817806854AF860B3D6 /* AnnotationOverlay.swift */,
+				62A181522D12AFE59ABDF474 /* AnnotationRenderer.swift */,
+				8B840D5A9684C349673CF7BB /* AppSettings.swift */,
+				B004CAA54686638938D1487F /* CaptureController.swift */,
+				B322A53FE50B0372C2B83EB2 /* CaptureMode.swift */,
+				9A138F5012F151768C83791E /* ContentView.swift */,
+				B9E81108147F2DADCA2A4629 /* EditorView.swift */,
+				1D6F67AD89687543646C4A72 /* HotKeyManager.swift */,
+				0F0FB5BB4B416253D08D8BD9 /* ImageMosaic.swift */,
+				70EB996B687D0CA04C991D0A /* KeyChord.swift */,
+				A371D06C2F7764073A72D5D2 /* RegionSelector.swift */,
+				8FCEFC6BACFDAB35F69A592D /* YouShotApp.swift */,
+			);
+			path = YouShot;
+			sourceTree = "<group>";
+		};
+		4F7093C84FDAFEA241D7FFEC /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				41C66CAE8F6D2507EDF8ECB3 /* YouShot */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		7F08C7EC510B663148225B42 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				880141A456091751F6B8FDF4 /* YouShot.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		9975E116A554518E17AB96A2 /* OS X */ = {
+			isa = PBXGroup;
+			children = (
+				BE4430939620554F39BBB361 /* Cocoa.framework */,
+			);
+			name = "OS X";
+			sourceTree = "<group>";
+		};
+		A63A6CB9F9B0254DBEECE459 = {
+			isa = PBXGroup;
+			children = (
+				7F08C7EC510B663148225B42 /* Products */,
+				B0E67917A0AABD5F70AD9A8D /* Frameworks */,
+				4F7093C84FDAFEA241D7FFEC /* Sources */,
+				2C19EC656F6D586E884BE948 /* Resources */,
+				5E3385CEDEC48309B9E7F709 /* youshot.icon */,
+				AA17C528780748EC5BA4ACD2 /* Package.swift */,
+				08BC21285CD1649F7869E198 /* AGENTS.md */,
+			);
+			sourceTree = "<group>";
+		};
+		B0E67917A0AABD5F70AD9A8D /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				9975E116A554518E17AB96A2 /* OS X */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		905671387C5DBF18FE0BB93C /* YouShot */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5B47EE7E02A6DD61CF61FF19 /* Build configuration list for PBXNativeTarget "YouShot" */;
+			buildPhases = (
+				29E0F420EFD478EDCFF44DF2 /* Sources */,
+				6E79B5AA8C5D9779202B9ED0 /* Frameworks */,
+				66EC9B77DC89C7FD27622ED4 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = YouShot;
+			productName = YouShot;
+			productReference = 880141A456091751F6B8FDF4 /* YouShot.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		32BB1E773825C0FB7AF40BFA /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastSwiftUpdateCheck = 2600;
+				LastUpgradeCheck = 2700;
+				TargetAttributes = {
+					905671387C5DBF18FE0BB93C = {
+						CreatedOnToolsVersion = 26.0;
+					};
+				};
+			};
+			buildConfigurationList = 333E039B44C6E3F37A242F02 /* Build configuration list for PBXProject "YouShot" */;
+			compatibilityVersion = "Xcode 3.2";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = A63A6CB9F9B0254DBEECE459;
+			productRefGroup = 7F08C7EC510B663148225B42 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				905671387C5DBF18FE0BB93C /* YouShot */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		66EC9B77DC89C7FD27622ED4 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DC45405304E4D7009A20FC40 /* MenuBarIcon.png in Resources */,
+				C4E8A91F2B7D4E0A9F31C6D2 /* youshot.icon in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		29E0F420EFD478EDCFF44DF2 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5D7BF1E97FD9C3B5EB01F0D1 /* AnnotationOverlay.swift in Sources */,
+				7BB6FCC135C6EC4CAB97C025 /* AnnotationRenderer.swift in Sources */,
+				3AA1C8B4B8ABA70187FD50CE /* AppSettings.swift in Sources */,
+				A7E97ED096106C664443292C /* CaptureController.swift in Sources */,
+				7B2CBADC1CFF77F8F8E74551 /* CaptureMode.swift in Sources */,
+				5A3CF092285413285DD6F13D /* ContentView.swift in Sources */,
+				594F6F24B7DAE453D9CB6DD5 /* EditorView.swift in Sources */,
+				587793D4415D91E5A816FC42 /* HotKeyManager.swift in Sources */,
+				F60397456D4919AEB30B3F0A /* ImageMosaic.swift in Sources */,
+				7339E9A522B52A3628639472 /* KeyChord.swift in Sources */,
+				8EBE6986BCDF90463E2486DA /* RegionSelector.swift in Sources */,
+				6C00A713EC1BC2D55A37EDC9 /* YouShotApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		2C59AE5AE3D775A583F09F54 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		99F86FF62E5C04EAD3264D86 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = youshot;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = C6H9D46LA6;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Resources/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.youshot.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Release;
+		};
+		B8793614F4B53CA41ED66F94 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		DA1E6BA37BAFC46CE8273AC3 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = youshot;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = C6H9D46LA6;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Resources/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.youshot.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		333E039B44C6E3F37A242F02 /* Build configuration list for PBXProject "YouShot" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2C59AE5AE3D775A583F09F54 /* Debug */,
+				B8793614F4B53CA41ED66F94 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		5B47EE7E02A6DD61CF61FF19 /* Build configuration list for PBXNativeTarget "YouShot" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				99F86FF62E5C04EAD3264D86 /* Release */,
+				DA1E6BA37BAFC46CE8273AC3 /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 32BB1E773825C0FB7AF40BFA /* Project object */;
+}

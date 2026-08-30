@@ -1,0 +1,1044 @@
+import AppKit
+import Combine
+import CoreGraphics
+import CoreMedia
+import CoreVideo
+import ScreenCaptureKit
+
+
+@MainActor
+final class CaptureController: ObservableObject {
+    @Published var delaySeconds: Int = 0
+    @Published var includeCursor: Bool = true
+    @Published var mode: CaptureMode = .currentDisplay
+    /// 设置窗口左侧导航当前项（避免 ContentView 依赖 @State 宏）
+    @Published var settingsTabRaw: String = "capture"
+    @Published var isBusy: Bool = false
+    @Published var remainingSeconds: Int = 0
+    @Published var lastPreview: NSImage?
+    @Published var lastFileURL: URL?
+    @Published var statusMessage: String?
+    @Published var hasError: Bool = false
+
+    @Published var blurSigma: Double = AppSettings.blurSigma {
+        didSet { AppSettings.blurSigma = blurSigma }
+    }
+    @Published var blurFeather: Double = AppSettings.blurFeather {
+        didSet { AppSettings.blurFeather = blurFeather }
+    }
+    @Published var windowSnapEnabled: Bool = AppSettings.windowSnapEnabled {
+        didSet { AppSettings.windowSnapEnabled = windowSnapEnabled }
+    }
+    @Published var exportCornerRadius: Double = AppSettings.exportCornerRadius {
+        didSet { AppSettings.exportCornerRadius = exportCornerRadius }
+    }
+    @Published var exportShadowBlur: Double = AppSettings.exportShadowBlur {
+        didSet { AppSettings.exportShadowBlur = exportShadowBlur }
+    }
+    @Published var exportShadowOpacity: Double = AppSettings.exportShadowOpacity {
+        didSet { AppSettings.exportShadowOpacity = exportShadowOpacity }
+    }
+    @Published var strokeColorIndex: Int = AppSettings.strokeColorIndex {
+        didSet { AppSettings.strokeColorIndex = strokeColorIndex }
+    }
+    @Published var strokeWidth: Double = AppSettings.strokeWidth {
+        didSet { AppSettings.strokeWidth = strokeWidth }
+    }
+    @Published var penBrush: PenBrush = AppSettings.penBrush {
+        didSet { AppSettings.penBrush = penBrush }
+    }
+    @Published var strokeOpacity: Double = AppSettings.strokeOpacity {
+        didSet { AppSettings.strokeOpacity = strokeOpacity }
+    }
+    @Published var highlightDim: Double = AppSettings.highlightDim {
+        didSet { AppSettings.highlightDim = highlightDim }
+    }
+    @Published var watermarkText: String = AppSettings.watermarkText {
+        didSet { AppSettings.watermarkText = watermarkText }
+    }
+    @Published var watermarkStyle: WatermarkStyle = AppSettings.watermarkStyle {
+        didSet { AppSettings.watermarkStyle = watermarkStyle }
+    }
+    @Published var watermarkColorIndex: Int = AppSettings.watermarkColorIndex {
+        didSet { AppSettings.watermarkColorIndex = watermarkColorIndex }
+    }
+    @Published var watermarkFontSize: Double = AppSettings.watermarkFontSize {
+        didSet { AppSettings.watermarkFontSize = watermarkFontSize }
+    }
+    @Published var watermarkOpacity: Double = AppSettings.watermarkOpacity {
+        didSet { AppSettings.watermarkOpacity = watermarkOpacity }
+    }
+
+    @Published var hotKeyCurrent: KeyChord = HotKeyDefaults.loadCurrent()
+    @Published var hotKeyRegion: KeyChord = HotKeyDefaults.loadRegion()
+    @Published var hotKeyAll: KeyChord = HotKeyDefaults.loadAll()
+
+    @Published var editorImage: NSImage?
+    @Published var editorURL: URL?
+    @Published var editorTool: EditorTool = .rect {
+        didSet {
+            guard oldValue == .text, editorTool != .text, showTextInput else { return }
+            if textDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                cancelTextInput()
+            } else {
+                confirmTextInput()
+            }
+        }
+    }
+    @Published private(set) var canUndoEditor = false
+    @Published private(set) var canRedoEditor = false
+    @Published var recordingHotKeyMode: CaptureMode?
+    @Published var showTextInput = false
+    @Published var textDraft = ""
+    @Published var pendingTextPoint: CGPoint?
+    @Published var overlaySelection = CGRect.zero
+    @Published var overlayResizing = false
+    /// 高亮区域（截图像素坐标），共用一层遮罩，导出时才合入图片
+    @Published var highlightRects: [CGRect] = []
+    @Published var overlayToast: String?
+    var overlayResizeOrigin: CGRect?
+
+    var onHotKeysChanged: (() -> Void)?
+    var onEscapeCancelEnabled: ((Bool) -> Void)?
+    private var hotKeyMonitor: Any?
+    private var editorBaseImage: NSImage?
+    private var editorRedoStack: [EditorSnapshot] = []
+    private var toastTask: Task<Void, Never>?
+    private var editorBackdrop: NSImage?
+    private var editorBackdropCG: CGImage?
+    private var editorHostScreenFrame: CGRect?
+    private var editorSelectionFrame: CGRect?
+
+    var editorPixelScale: CGSize {
+        guard let full = editorBackdropCG, let screen = editorHostScreenFrame, screen.width > 0, screen.height > 0 else {
+            return CGSize(width: 2, height: 2)
+        }
+        return CGSize(
+            width: CGFloat(full.width) / screen.width,
+            height: CGFloat(full.height) / screen.height
+        )
+    }
+
+    var annotationColor: NSColor { AnnotationPalette.color(at: strokeColorIndex) }
+
+    /// 文字标注字号（点），跟随粗细变化
+    var annotationFontSize: Double { strokeWidth * 6 }
+
+    private var strokePixelWidth: CGFloat {
+        max(1, CGFloat(strokeWidth) * editorPixelScale.width)
+    }
+
+    var countdownText: String {
+        if remainingSeconds > 0 {
+            return "\(remainingSeconds) 秒后截图"
+        }
+        return "正在截图…"
+    }
+
+    var hasScreenPermission: Bool {
+        CGPreflightScreenCaptureAccess()
+    }
+
+    var hasEditor: Bool { editorImage != nil }
+
+    private var captureTask: Task<Void, Never>?
+    private let hud = CountdownHUD()
+    private let regionSelector = RegionSelector()
+    private var editorUndoStack: [EditorSnapshot] = []
+
+    func shortcut(for mode: CaptureMode) -> String {
+        switch mode {
+        case .currentDisplay: return hotKeyCurrent.displayString
+        case .region: return hotKeyRegion.displayString
+        case .allDisplays: return hotKeyAll.displayString
+        }
+    }
+
+    func setHotKey(_ chord: KeyChord, for mode: CaptureMode) {
+        switch mode {
+        case .currentDisplay:
+            hotKeyCurrent = chord
+            HotKeyDefaults.saveCurrent(chord)
+        case .region:
+            hotKeyRegion = chord
+            HotKeyDefaults.saveRegion(chord)
+        case .allDisplays:
+            hotKeyAll = chord
+            HotKeyDefaults.saveAll(chord)
+        }
+        onHotKeysChanged?()
+        statusMessage = "已更新快捷键：\(mode.title) \(chord.displayString)"
+        hasError = false
+    }
+
+    func beginHotKeyRecording(_ mode: CaptureMode) {
+        stopHotKeyRecording()
+        recordingHotKeyMode = mode
+        hotKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            if event.keyCode == 53 {
+                Task { @MainActor in self?.stopHotKeyRecording() }
+                return nil
+            }
+            guard let chord = KeyChord.from(event: event) else { return nil }
+            Task { @MainActor in
+                guard let self, let mode = self.recordingHotKeyMode else { return }
+                self.setHotKey(chord, for: mode)
+                self.stopHotKeyRecording()
+            }
+            return nil
+        }
+    }
+
+    func stopHotKeyRecording() {
+        if let hotKeyMonitor {
+            NSEvent.removeMonitor(hotKeyMonitor)
+        }
+        hotKeyMonitor = nil
+        recordingHotKeyMode = nil
+    }
+
+    func requestPermissionIfNeeded() {
+        if !CGPreflightScreenCaptureAccess() {
+            CGRequestScreenCaptureAccess()
+            hasError = true
+            statusMessage = "需要屏幕录制权限才能截图"
+        }
+    }
+
+    func openScreenRecordingSettings() {
+        let urls = [
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+            "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ScreenCapture",
+        ]
+        for string in urls {
+            if let url = URL(string: string), NSWorkspace.shared.open(url) {
+                return
+            }
+        }
+    }
+
+    func startCapture(mode overrideMode: CaptureMode? = nil) {
+        guard !isBusy else { return }
+        if let overrideMode {
+            mode = overrideMode
+        }
+        if !CGPreflightScreenCaptureAccess() {
+            CGRequestScreenCaptureAccess()
+            hasError = true
+            statusMessage = "未获得屏幕录制权限，请在系统设置中授权后重试"
+            return
+        }
+        captureTask?.cancel()
+        hasError = false
+        statusMessage = nil
+        setBusy(true)
+        let captureMode = mode
+        captureTask = Task { [weak self] in
+            await self?.runCapture(mode: captureMode)
+        }
+    }
+
+    func cancel() {
+        captureTask?.cancel()
+        captureTask = nil
+        regionSelector.cancel()
+        hud.close()
+        finishIdle(message: "已取消")
+    }
+
+    func revealLastFile() {
+        guard let url = lastFileURL else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    func openSaveFolder() {
+        NSWorkspace.shared.open(saveDirectory)
+    }
+
+    // MARK: - Editor
+
+    func applyRect(pixelRect: CGRect) {
+        let color = annotationColor
+        let width = strokePixelWidth
+        commitEdit { AnnotationRenderer.drawRect(on: $0, rect: pixelRect, color: color, lineWidth: width) }
+    }
+
+    func applyLine(from: CGPoint, to: CGPoint) {
+        let color = annotationColor
+        let width = strokePixelWidth
+        commitEdit { AnnotationRenderer.drawLine(on: $0, from: from, to: to, color: color, lineWidth: width) }
+    }
+
+    func applyArrow(from: CGPoint, to: CGPoint) {
+        let color = annotationColor
+        let width = strokePixelWidth
+        commitEdit { AnnotationRenderer.drawArrow(on: $0, from: from, to: to, color: color, lineWidth: width) }
+    }
+
+    func applyPen(points: [CGPoint]) {
+        let color = annotationColor
+        let width = strokePixelWidth
+        let brush = penBrush
+        let opacity = CGFloat(strokeOpacity)
+        commitEdit {
+            AnnotationRenderer.drawPen(
+                on: $0,
+                points: points,
+                color: color,
+                lineWidth: width,
+                brush: brush,
+                opacity: opacity
+            )
+        }
+    }
+
+    /// 水印按次叠加，应用后切回矩形工具收起水印设置，避免重复添加。
+    func applyWatermark() {
+        let text = watermarkText
+        let style = watermarkStyle
+        let scale = editorPixelScale.width
+        let fontSize = CGFloat(watermarkFontSize) * scale
+        let color = AnnotationPalette.color(at: watermarkColorIndex)
+        let opacity = CGFloat(watermarkOpacity)
+        commitEdit {
+            AnnotationRenderer.drawWatermark(
+                on: $0,
+                text: text,
+                style: style,
+                scale: scale,
+                fontSize: fontSize,
+                color: color,
+                opacity: opacity
+            )
+        }
+        editorTool = .rect
+        flashToast("已添加水印")
+    }
+
+    func beginTextInput(at point: CGPoint) {
+        if showTextInput { confirmTextInput() }
+        pendingTextPoint = point
+        textDraft = ""
+        showTextInput = true
+    }
+
+    func confirmTextInput() {
+        if let point = pendingTextPoint {
+            let text = textDraft
+            let color = annotationColor
+            let size = strokePixelWidth * 6
+            commitEdit {
+                AnnotationRenderer.drawText(on: $0, text: text, at: point, color: color, fontSize: size)
+            }
+        }
+        showTextInput = false
+        pendingTextPoint = nil
+        textDraft = ""
+    }
+
+    func cancelTextInput() {
+        showTextInput = false
+        pendingTextPoint = nil
+        textDraft = ""
+    }
+
+    func applyRedact(pixelRect: CGRect) {
+        switch editorTool {
+        case .mosaic:
+            commitEdit { ImageRedact.applyMosaic(to: $0, rect: pixelRect) }
+        case .highlight:
+            pushHistory()
+            highlightRects.append(pixelRect)
+            persistEditorImage()
+        case .blur:
+            commitEdit {
+                ImageRedact.applyBlur(
+                    to: $0,
+                    rect: pixelRect,
+                    sigma: CGFloat(blurSigma),
+                    feather: CGFloat(blurFeather)
+                )
+            }
+        default:
+            break
+        }
+    }
+
+    func undoEditor() {
+        guard let current = editorImage, let previous = editorUndoStack.popLast() else { return }
+        editorRedoStack.append(EditorSnapshot(image: current, highlights: highlightRects))
+        restore(previous)
+    }
+
+    func redoEditor() {
+        guard let current = editorImage, let next = editorRedoStack.popLast() else { return }
+        editorUndoStack.append(EditorSnapshot(image: current, highlights: highlightRects))
+        restore(next)
+    }
+
+    func copyEditor() {
+        guard let image = editorImage, let cg = image.youshotCGImage else { return }
+        let styled = NSImage(youshotCGImage: styledExport(flattened(cg)))
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        if let url = editorURL {
+            pasteboard.writeObjects([url as NSURL])
+        }
+        pasteboard.writeObjects([styled])
+        statusMessage = "已复制到剪贴板"
+        hasError = false
+    }
+
+    func saveEditor() {
+        persistFinalImage()
+        if let url = editorURL {
+            lastFileURL = url
+            copyEditor()
+            statusMessage = "已保存并复制"
+            hasError = false
+            flashToast("已保存到 图片/YouShot 并复制")
+        }
+    }
+
+    /// 完成：保存、复制并关闭
+    func confirmEditor() {
+        saveEditor()
+        closeEditor()
+    }
+
+    /// 取消：恢复到进入编辑时的原图并关闭
+    func cancelEditor() {
+        if let base = editorBaseImage {
+            editorImage = base
+            highlightRects.removeAll()
+            persistEditorImage()
+        }
+        closeEditor()
+        statusMessage = "已取消编辑"
+        hasError = false
+    }
+
+    func closeEditor() {
+        AnnotationOverlay.shared.dismiss()
+        editorImage = nil
+        editorURL = nil
+        editorBaseImage = nil
+        editorBackdrop = nil
+        editorBackdropCG = nil
+        editorHostScreenFrame = nil
+        editorSelectionFrame = nil
+        overlaySelection = .zero
+        overlayResizing = false
+        overlayResizeOrigin = nil
+        highlightRects.removeAll()
+        cancelTextInput()
+        editorUndoStack.removeAll()
+        editorRedoStack.removeAll()
+        canUndoEditor = false
+        canRedoEditor = false
+        toastTask?.cancel()
+        overlayToast = nil
+    }
+
+    /// 从菜单重新打开当前标注层（仍在冻结的整屏背景上）
+    func reopenEditorOverlay() {
+        guard let image = editorImage ?? lastPreview,
+              let screenFrame = editorHostScreenFrame,
+              let selectionFrame = editorSelectionFrame,
+              let backdrop = editorBackdrop
+        else { return }
+        if editorImage == nil {
+            editorImage = image
+            editorBaseImage = image
+        }
+        overlaySelection = CGRect(
+            x: selectionFrame.minX - screenFrame.minX,
+            y: screenFrame.maxY - selectionFrame.maxY,
+            width: selectionFrame.width,
+            height: selectionFrame.height
+        )
+        overlayResizing = false
+        overlayResizeOrigin = nil
+        AnnotationOverlay.shared.present(
+            controller: self,
+            screenFrame: screenFrame,
+            selectionFrame: selectionFrame,
+            backdrop: backdrop
+        )
+    }
+
+    private func commitEdit(_ transform: (CGImage) -> CGImage?) {
+        guard let current = editorImage, let cg = current.youshotCGImage else { return }
+        guard let result = transform(cg) else { return }
+        pushHistory()
+        editorImage = NSImage(youshotCGImage: result)
+        persistEditorImage()
+    }
+
+    private func pushHistory() {
+        guard let image = editorImage else { return }
+        editorUndoStack.append(EditorSnapshot(image: image, highlights: highlightRects))
+        editorRedoStack.removeAll()
+        canUndoEditor = true
+        canRedoEditor = false
+    }
+
+    private func restore(_ snapshot: EditorSnapshot) {
+        editorImage = snapshot.image
+        highlightRects = snapshot.highlights
+        canUndoEditor = !editorUndoStack.isEmpty
+        canRedoEditor = !editorRedoStack.isEmpty
+        persistEditorImage()
+    }
+
+    /// 把高亮遮罩层合入图片
+    private func flattened(_ image: CGImage) -> CGImage {
+        guard !highlightRects.isEmpty else { return image }
+        return AnnotationRenderer.drawHighlight(
+            on: image,
+            rects: highlightRects,
+            dim: CGFloat(highlightDim)
+        ) ?? image
+    }
+
+    private func flashToast(_ text: String) {
+        overlayToast = text
+        toastTask?.cancel()
+        toastTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1.8))
+            guard !Task.isCancelled else { return }
+            self?.overlayToast = nil
+        }
+    }
+
+    private func persistEditorImage() {
+        guard let image = editorImage, let cg = image.youshotCGImage, let url = editorURL else { return }
+        let flat = flattened(cg)
+        lastPreview = NSImage(youshotCGImage: flat)
+        try? PNGFile.write(flat, to: url)
+    }
+
+    private func persistFinalImage() {
+        guard let image = editorImage, let cg = image.youshotCGImage, let url = editorURL else { return }
+        let styled = styledExport(flattened(cg))
+        try? PNGFile.write(styled, to: url)
+        lastPreview = NSImage(youshotCGImage: styled)
+    }
+
+    private func styledExport(_ image: CGImage, scale: CGFloat? = nil) -> CGImage {
+        let pixelScale = scale ?? editorPixelScale.width
+        return ImageExportStyle.apply(
+            image,
+            cornerRadius: CGFloat(exportCornerRadius) * pixelScale,
+            shadowBlur: CGFloat(exportShadowBlur) * pixelScale,
+            shadowOpacity: CGFloat(exportShadowOpacity),
+            shadowOffsetY: CGFloat(exportShadowBlur) * 0.35 * pixelScale
+        ) ?? image
+    }
+
+    /// 拖动选区手柄后，从整屏冻结图重新裁出标注内容。
+    func recropSelection(inScreen rect: CGRect) {
+        guard let full = editorBackdropCG, let screenFrame = editorHostScreenFrame else { return }
+        let bounds = CGRect(origin: .zero, size: screenFrame.size)
+        let clamped = rect.intersection(bounds)
+        guard clamped.width >= 8, clamped.height >= 8 else { return }
+
+        editorSelectionFrame = CGRect(
+            x: screenFrame.minX + clamped.minX,
+            y: screenFrame.maxY - clamped.minY - clamped.height,
+            width: clamped.width,
+            height: clamped.height
+        )
+
+        let scaleX = CGFloat(full.width) / screenFrame.width
+        let scaleY = CGFloat(full.height) / screenFrame.height
+        let pixel = CGRect(
+            x: clamped.minX * scaleX,
+            y: clamped.minY * scaleY,
+            width: clamped.width * scaleX,
+            height: clamped.height * scaleY
+        )
+        .integral
+        .intersection(CGRect(x: 0, y: 0, width: full.width, height: full.height))
+        guard pixel.width >= 1, pixel.height >= 1, let cropped = full.cropping(to: pixel) else { return }
+
+        let image = NSImage(youshotCGImage: cropped)
+        editorUndoStack.removeAll()
+        editorRedoStack.removeAll()
+        canUndoEditor = false
+        canRedoEditor = false
+        highlightRects.removeAll()
+        editorBaseImage = image
+        editorImage = image
+        persistEditorImage()
+    }
+
+    private func presentEditor(
+        image: NSImage,
+        url: URL,
+        screenFrame: CGRect,
+        selectionFrame: CGRect,
+        backdrop: NSImage,
+        fullImage: CGImage
+    ) {
+        editorUndoStack.removeAll()
+        editorRedoStack.removeAll()
+        canUndoEditor = false
+        canRedoEditor = false
+        highlightRects.removeAll()
+        editorBaseImage = image
+        editorImage = image
+        editorURL = url
+        editorBackdrop = backdrop
+        editorBackdropCG = fullImage
+        editorHostScreenFrame = screenFrame
+        editorSelectionFrame = selectionFrame
+        editorTool = .rect
+        lastPreview = image
+        lastFileURL = url
+        overlaySelection = CGRect(
+            x: selectionFrame.minX - screenFrame.minX,
+            y: screenFrame.maxY - selectionFrame.maxY,
+            width: selectionFrame.width,
+            height: selectionFrame.height
+        )
+        overlayResizing = false
+        overlayResizeOrigin = nil
+        AnnotationOverlay.shared.present(
+            controller: self,
+            screenFrame: screenFrame,
+            selectionFrame: selectionFrame,
+            backdrop: backdrop
+        )
+    }
+
+    private func globalFrame(for selection: RegionSelection) -> CGRect {
+        let nsScreen = screen(for: selection.displayID) ?? screenUnderMouse()
+        let local = selection.displayLocalRect
+        return CGRect(
+            x: nsScreen.frame.minX + local.minX,
+            y: nsScreen.frame.maxY - local.minY - local.height,
+            width: local.width,
+            height: local.height
+        )
+    }
+
+    // MARK: - Capture flow
+
+    private func runCapture(mode: CaptureMode) async {
+        do {
+            let results: [CaptureResult]
+            switch mode {
+            case .currentDisplay:
+                try await runDelay(on: screenUnderMouse())
+                results = [try await captureDisplay(screenUnderMouse())]
+            case .allDisplays:
+                try await runDelay(on: screenUnderMouse())
+                results = try await captureAllDisplays()
+            case .region:
+                // 先选区域，再延迟，再截图
+                guard let selection = await regionSelector.pick(snapWindows: windowSnapEnabled) else {
+                    throw CancellationError()
+                }
+                try Task.checkCancellation()
+                let delayScreen = screen(for: selection.displayID) ?? screenUnderMouse()
+                try await runDelay(on: delayScreen)
+                let captured = try await captureRegionOnFrozenScreen(selection)
+                results = [captured.result]
+                lastFileURL = captured.result.url
+                lastPreview = captured.regionImage
+                finishIdle(message: "在截图位置继续标注，完成后点绿色勾")
+                presentEditor(
+                    image: captured.regionImage,
+                    url: captured.result.url,
+                    screenFrame: captured.screen.frame,
+                    selectionFrame: globalFrame(for: selection),
+                    backdrop: captured.backdrop,
+                    fullImage: captured.fullImage
+                )
+                // 标注层已覆盖在冻结画面上后再撤掉选区层，避免松开鼠标时闪回原画面。
+                regionSelector.dismiss()
+                return
+            }
+
+            guard let first = results.first else {
+                throw CaptureError.noDisplay
+            }
+            lastFileURL = first.url
+            let preview = NSImage(contentsOf: first.url)
+            lastPreview = preview
+            copyFileToPasteboard(first.url)
+            let message: String
+            if results.count == 1 {
+                message = "已保存 \(first.pixelWidth)×\(first.pixelHeight) PNG，并已复制到剪贴板"
+            } else {
+                message = "已保存 \(results.count) 张屏幕截图，剪贴板为指针所在屏"
+            }
+            finishIdle(message: message)
+        } catch is CancellationError {
+            hud.close()
+            regionSelector.dismiss()
+            finishIdle(message: "已取消")
+        } catch {
+            hud.close()
+            regionSelector.dismiss()
+            hasError = true
+            finishIdle(message: error.localizedDescription)
+        }
+    }
+
+    private func runDelay(on screen: NSScreen) async throws {
+        if delaySeconds > 0 {
+            for remaining in stride(from: delaySeconds, through: 1, by: -1) {
+                try Task.checkCancellation()
+                remainingSeconds = remaining
+                hud.show(seconds: remaining, on: screen)
+                try await Task.sleep(for: .seconds(1))
+            }
+        }
+        try Task.checkCancellation()
+        remainingSeconds = 0
+        hud.close()
+        try await Task.sleep(for: .milliseconds(150))
+        try Task.checkCancellation()
+    }
+
+    private func finishIdle(message: String) {
+        remainingSeconds = 0
+        setBusy(false)
+        statusMessage = message
+    }
+
+    private func setBusy(_ busy: Bool) {
+        isBusy = busy
+        onEscapeCancelEnabled?(busy)
+    }
+
+    private var saveDirectory: URL {
+        FileManager.default.urls(for: .picturesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("YouShot", isDirectory: true)
+    }
+
+    private func screenUnderMouse() -> NSScreen {
+        let mouse = NSEvent.mouseLocation
+        return NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) }
+            ?? NSScreen.main
+            ?? NSScreen.screens[0]
+    }
+
+    private func screen(for displayID: CGDirectDisplayID) -> NSScreen? {
+        NSScreen.screens.first {
+            self.displayID(of: $0) == displayID
+        }
+    }
+
+    private func copyFileToPasteboard(_ url: URL) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects([url as NSURL])
+        if let image = NSImage(contentsOf: url) {
+            pasteboard.writeObjects([image])
+        }
+    }
+
+    private func captureAllDisplays() async throws -> [CaptureResult] {
+        let content = try await shareableContent()
+        let mouseScreen = screenUnderMouse()
+        let mouseID = displayID(of: mouseScreen)
+        var results: [CaptureResult] = []
+        let stamp = timestamp()
+        var index = 1
+        for screen in NSScreen.screens {
+            let id = displayID(of: screen)
+            guard let display = content.displays.first(where: { $0.displayID == id }) else { continue }
+            let result = try await capture(
+                display: display,
+                content: content,
+                sourceRect: nil,
+                fileName: "YouShot-\(stamp)-\(index).png"
+            )
+            if id == mouseID {
+                results.insert(result, at: 0)
+            } else {
+                results.append(result)
+            }
+            index += 1
+        }
+        if results.isEmpty { throw CaptureError.noDisplay }
+        return results
+    }
+
+    private func captureDisplay(_ screen: NSScreen) async throws -> CaptureResult {
+        let content = try await shareableContent()
+        let id = displayID(of: screen)
+        guard let display = content.displays.first(where: { $0.displayID == id })
+                ?? content.displays.first
+        else {
+            throw CaptureError.noDisplay
+        }
+        return try await capture(
+            display: display,
+            content: content,
+            sourceRect: nil,
+            fileName: "YouShot-\(timestamp()).png"
+        )
+    }
+
+    /// 先截整屏作操作区冻结背景，再从同一张图裁出选区保存。
+    private func captureRegionOnFrozenScreen(_ selection: RegionSelection) async throws -> RegionCaptureBundle {
+        let nsScreen = screen(for: selection.displayID) ?? screenUnderMouse()
+        let content = try await shareableContent()
+        guard let display = content.displays.first(where: { $0.displayID == selection.displayID })
+                ?? content.displays.first
+        else {
+            throw CaptureError.noDisplay
+        }
+        let full = try await captureImage(display: display, content: content, sourceRect: nil)
+        let scaleX = CGFloat(full.width) / nsScreen.frame.width
+        let scaleY = CGFloat(full.height) / nsScreen.frame.height
+        let pixelRect = CGRect(
+            x: selection.displayLocalRect.minX * scaleX,
+            y: selection.displayLocalRect.minY * scaleY,
+            width: selection.displayLocalRect.width * scaleX,
+            height: selection.displayLocalRect.height * scaleY
+        )
+        .integral
+        .intersection(CGRect(x: 0, y: 0, width: full.width, height: full.height))
+        guard pixelRect.width >= 1, pixelRect.height >= 1,
+              let regionCrop = full.cropping(to: pixelRect)
+        else {
+            throw CaptureError.noDisplay
+        }
+        // 吸附到窗口时单独采集该窗口，圆角外为透明，避免把窗口投影一起截进来
+        let cropped = await captureWindowImage(selection.windowID, content: content) ?? regionCrop
+
+        try FileManager.default.createDirectory(at: saveDirectory, withIntermediateDirectories: true)
+        let url = saveDirectory.appendingPathComponent("YouShot-\(timestamp()).png")
+        try PNGFile.write(cropped, to: url)
+
+        return RegionCaptureBundle(
+            result: CaptureResult(url: url, pixelWidth: cropped.width, pixelHeight: cropped.height),
+            regionImage: NSImage(youshotCGImage: cropped),
+            backdrop: NSImage(cgImage: full, size: nsScreen.frame.size),
+            fullImage: full,
+            screen: nsScreen
+        )
+    }
+
+    private func capture(
+        display: SCDisplay,
+        content: SCShareableContent,
+        sourceRect: CGRect?,
+        fileName: String
+    ) async throws -> CaptureResult {
+        let image = try await captureImage(display: display, content: content, sourceRect: sourceRect)
+        let scale = CGFloat(
+            NSScreen.screens.first { displayID(of: $0) == display.displayID }?.backingScaleFactor ?? 2
+        )
+        let exported = styledExport(image, scale: scale)
+        try FileManager.default.createDirectory(at: saveDirectory, withIntermediateDirectories: true)
+        let url = saveDirectory.appendingPathComponent(fileName)
+        try PNGFile.write(exported, to: url)
+        return CaptureResult(url: url, pixelWidth: exported.width, pixelHeight: exported.height)
+    }
+
+    /// 按窗口采集：背景透明、不含系统投影。
+    private func captureWindowImage(_ windowID: CGWindowID?, content: SCShareableContent) async -> CGImage? {
+        guard let windowID,
+              let window = content.windows.first(where: { $0.windowID == windowID })
+        else {
+            return nil
+        }
+        let filter = SCContentFilter(desktopIndependentWindow: window)
+        let scale = CGFloat(filter.pointPixelScale)
+        let config = SCStreamConfiguration()
+        config.width = Int((filter.contentRect.width * scale).rounded())
+        config.height = Int((filter.contentRect.height * scale).rounded())
+        config.showsCursor = false
+        config.capturesAudio = false
+        config.pixelFormat = kCVPixelFormatType_32BGRA
+        config.captureResolution = .best
+        config.ignoreShadowsSingleWindow = true
+        config.shouldBeOpaque = false
+        return try? await SCScreenshotManager.captureImage(
+            contentFilter: filter,
+            configuration: config
+        )
+    }
+
+    private func captureImage(
+        display: SCDisplay,
+        content: SCShareableContent,
+        sourceRect: CGRect?
+    ) async throws -> CGImage {
+        // 排除 YouShot 自己的截图遮罩/HUD/标注层，但把当前可见的正常设置窗口加回。
+        // 这样既不会把操作层截进去，也能对 YouShot 设置页做整屏、区域或窗口截图。
+        let ownBundleIDs = Set(
+            [Bundle.main.bundleIdentifier, "top.yayalu.youshot", "com.youshot.app"]
+                .compactMap { $0 }
+        )
+        let selfApps = content.applications.filter { ownBundleIDs.contains($0.bundleIdentifier) }
+        let capturableSelfWindowIDs = Set(
+            NSApp.windows.compactMap { window -> CGWindowID? in
+                guard window.isVisible,
+                      window.alphaValue > 0.01,
+                      window.sharingType != .none,
+                      window.styleMask.contains(.titled)
+                else {
+                    return nil
+                }
+                return CGWindowID(window.windowNumber)
+            }
+        )
+        let capturableSelfWindows = content.windows.filter {
+            capturableSelfWindowIDs.contains($0.windowID)
+        }
+        let filter = SCContentFilter(
+            display: display,
+            excludingApplications: selfApps,
+            exceptingWindows: capturableSelfWindows
+        )
+        let scale = CGFloat(filter.pointPixelScale)
+        let config = SCStreamConfiguration()
+        if let sourceRect {
+            config.sourceRect = sourceRect
+            config.width = Int((sourceRect.width * scale).rounded())
+            config.height = Int((sourceRect.height * scale).rounded())
+        } else {
+            config.width = Int((filter.contentRect.width * scale).rounded())
+            config.height = Int((filter.contentRect.height * scale).rounded())
+        }
+        config.showsCursor = includeCursor
+        config.capturesAudio = false
+        config.pixelFormat = kCVPixelFormatType_32BGRA
+        config.captureResolution = .best
+        config.minimumFrameInterval = CMTime(value: 1, timescale: 1)
+
+        return try await SCScreenshotManager.captureImage(
+            contentFilter: filter,
+            configuration: config
+        )
+    }
+
+    private func shareableContent() async throws -> SCShareableContent {
+        if !CGPreflightScreenCaptureAccess() {
+            throw CaptureError.permissionDenied
+        }
+        do {
+            // 区域选取层会保留到冻结截图完成。目标窗口此时可能被全屏遮罩完全覆盖，
+            // 因此需要包含全部窗口，才能继续按 windowID 完成透明窗口采集。
+            return try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+        } catch {
+            throw CaptureError.permissionDenied
+        }
+    }
+
+    private func displayID(of screen: NSScreen) -> CGDirectDisplayID {
+        UInt32(
+            (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
+        )
+    }
+
+    private func timestamp() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd-HHmmss"
+        return formatter.string(from: Date())
+    }
+}
+
+/// 撤销/重做的一步：图片内容 + 高亮遮罩
+private struct EditorSnapshot {
+    let image: NSImage
+    let highlights: [CGRect]
+}
+
+private struct CaptureResult {
+    let url: URL
+    let pixelWidth: Int
+    let pixelHeight: Int
+}
+
+private struct RegionCaptureBundle {
+    let result: CaptureResult
+    let regionImage: NSImage
+    let backdrop: NSImage
+    let fullImage: CGImage
+    let screen: NSScreen
+}
+
+private enum CaptureError: LocalizedError {
+    case noDisplay
+    case permissionDenied
+
+    var errorDescription: String? {
+        switch self {
+        case .noDisplay:
+            return "没有可用的显示器"
+        case .permissionDenied:
+            return "未获得屏幕录制权限，请在系统设置中授权后重试"
+        }
+    }
+}
+
+@MainActor
+private final class CountdownHUD {
+    private var panel: NSPanel?
+    private let label = NSTextField(labelWithString: "")
+
+    func show(seconds: Int, on screen: NSScreen) {
+        label.stringValue = "\(seconds)"
+        label.font = .monospacedDigitSystemFont(ofSize: 64, weight: .medium)
+        label.textColor = .white
+        label.alignment = .center
+        label.drawsBackground = false
+        label.isBezeled = false
+
+        if panel == nil {
+            let box = NSView(frame: NSRect(x: 0, y: 0, width: 140, height: 140))
+            box.wantsLayer = true
+            box.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.55).cgColor
+            box.layer?.cornerRadius = 20
+            label.frame = box.bounds.insetBy(dx: 8, dy: 8)
+            box.addSubview(label)
+
+            let created = CountdownPanel(
+                contentRect: box.bounds,
+                styleMask: [.borderless, .nonactivatingPanel],
+                backing: .buffered,
+                defer: false
+            )
+            created.isFloatingPanel = true
+            created.level = .statusBar
+            created.backgroundColor = .clear
+            created.isOpaque = false
+            created.hasShadow = false
+            created.ignoresMouseEvents = true
+            created.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+            created.sharingType = .none
+            created.contentView = box
+            panel = created
+        }
+
+        guard let panel else { return }
+        let frame = screen.visibleFrame
+        let size = panel.frame.size
+        panel.setFrameOrigin(
+            NSPoint(
+                x: frame.midX - size.width / 2,
+                y: frame.midY - size.height / 2
+            )
+        )
+        panel.orderFrontRegardless()
+        // 不激活 YouShot，也不抢键盘焦点。这样目标 App 的失焦即关闭面板
+        // （例如部分“设置”窗口）会在倒计时期间保持可见；Esc 由全局热键处理。
+    }
+
+    func close() {
+        panel?.orderOut(nil)
+        panel = nil
+    }
+}
+
+private final class CountdownPanel: NSPanel {
+    override var canBecomeKey: Bool { false }
+}
