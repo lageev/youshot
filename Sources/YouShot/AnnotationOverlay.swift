@@ -68,6 +68,7 @@ final class AnnotationOverlay {
         created.makeKey()
         NSApp.activate(ignoringOtherApps: true)
         panel = created
+        updateInitialCursor(controller: controller, screenFrame: screenFrame)
     }
 
     var isPresented: Bool { panel != nil }
@@ -78,11 +79,42 @@ final class AnnotationOverlay {
         panel?.orderOut(nil)
         panel = nil
         controller = nil
+        NSCursor.arrow.set()
     }
 
     private func hideTitledWindows() {
         for window in NSApp.windows where window.styleMask.contains(.titled) {
             window.orderOut(nil)
+        }
+    }
+
+    private func updateInitialCursor(controller: CaptureController, screenFrame: CGRect) {
+        let global = NSEvent.mouseLocation
+        let point = CGPoint(
+            x: global.x - screenFrame.minX,
+            y: screenFrame.maxY - global.y
+        )
+        let selection = controller.overlaySelection
+        guard selection.contains(point) else {
+            NSCursor.arrow.set()
+            return
+        }
+        let local = CGPoint(x: point.x - selection.minX, y: point.y - selection.minY)
+        if let cursor = OverlayCursor.resizeCursor(at: local, in: selection.size) {
+            cursor.set()
+            return
+        }
+        switch controller.editorTool {
+        case .text:
+            NSCursor.iBeam.set()
+        case .pen:
+            let width = CGFloat(controller.strokeWidth) * controller.penBrush.widthScale
+            let color = controller.annotationColor.withAlphaComponent(controller.strokeOpacity)
+            OverlayCursor.pen(color: color, diameter: width).set()
+        case .watermark:
+            NSCursor.arrow.set()
+        case .rect, .line, .arrow, .highlight, .mosaic, .blur:
+            NSCursor.crosshair.set()
         }
     }
 }
@@ -221,8 +253,168 @@ struct AnnotationOverlayRoot: View {
     }
 }
 
+/// Central cursor palette for the capture/editor overlay. AppKit's standard
+/// cursors are used whenever they express the action accurately; diagonal
+/// resize cursors are drawn as resolution-independent NSImages on macOS 14,
+/// where AppKit does not expose the native frame-resize variants publicly.
+@MainActor
+enum OverlayCursor {
+    enum ResizeDirection {
+        case horizontal
+        case vertical
+        case northwestSoutheast
+        case northeastSouthwest
+    }
+
+    private static var penCache: [String: NSCursor] = [:]
+    private static let northwestSoutheast = diagonalResizeCursor(descending: true)
+    private static let northeastSouthwest = diagonalResizeCursor(descending: false)
+
+    static func resize(_ direction: ResizeDirection) -> NSCursor {
+        if #available(macOS 15.0, *) {
+            switch direction {
+            case .horizontal:
+                return .frameResize(position: .left, directions: .all)
+            case .vertical:
+                return .frameResize(position: .top, directions: .all)
+            case .northwestSoutheast:
+                return .frameResize(position: .topLeft, directions: .all)
+            case .northeastSouthwest:
+                return .frameResize(position: .topRight, directions: .all)
+            }
+        }
+
+        switch direction {
+        case .horizontal: return .resizeLeftRight
+        case .vertical: return .resizeUpDown
+        case .northwestSoutheast: return northwestSoutheast
+        case .northeastSouthwest: return northeastSouthwest
+        }
+    }
+
+    static func pen(color: NSColor, diameter: CGFloat) -> NSCursor {
+        let rgb = color.usingColorSpace(.sRGB) ?? color
+        let dotDiameter = min(max(diameter, 3), 28)
+        let key = String(
+            format: "%.2f-%.2f-%.2f-%.2f-%.1f",
+            rgb.redComponent,
+            rgb.greenComponent,
+            rgb.blueComponent,
+            rgb.alphaComponent,
+            dotDiameter
+        )
+        if let cached = penCache[key] { return cached }
+
+        let size = max(18, dotDiameter + 8)
+        let center = NSPoint(x: size / 2, y: size / 2)
+        let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { _ in
+            let rect = NSRect(
+                x: center.x - dotDiameter / 2,
+                y: center.y - dotDiameter / 2,
+                width: dotDiameter,
+                height: dotDiameter
+            )
+            let dot = NSBezierPath(ovalIn: rect)
+            rgb.setFill()
+            dot.fill()
+            NSColor.black.withAlphaComponent(0.72).setStroke()
+            dot.lineWidth = 3
+            dot.stroke()
+            NSColor.white.withAlphaComponent(0.95).setStroke()
+            dot.lineWidth = 1
+            dot.stroke()
+            return true
+        }
+        let cursor = NSCursor(image: image, hotSpot: center)
+        penCache[key] = cursor
+        return cursor
+    }
+
+    static func resizeCursor(
+        at point: CGPoint,
+        in size: CGSize,
+        hitRadius: CGFloat = 12
+    ) -> NSCursor? {
+        let targets: [(CGPoint, ResizeDirection)] = [
+            (CGPoint(x: 0, y: 0), .northwestSoutheast),
+            (CGPoint(x: size.width / 2, y: 0), .vertical),
+            (CGPoint(x: size.width, y: 0), .northeastSouthwest),
+            (CGPoint(x: 0, y: size.height / 2), .horizontal),
+            (CGPoint(x: size.width, y: size.height / 2), .horizontal),
+            (CGPoint(x: 0, y: size.height), .northeastSouthwest),
+            (CGPoint(x: size.width / 2, y: size.height), .vertical),
+            (CGPoint(x: size.width, y: size.height), .northwestSoutheast),
+        ]
+        guard let target = targets.first(where: {
+            abs($0.0.x - point.x) <= hitRadius && abs($0.0.y - point.y) <= hitRadius
+        }) else { return nil }
+        return resize(target.1)
+    }
+
+    private static func diagonalResizeCursor(descending: Bool) -> NSCursor {
+        let size: CGFloat = 24
+        let start = descending ? NSPoint(x: 4, y: 20) : NSPoint(x: 4, y: 4)
+        let end = descending ? NSPoint(x: 20, y: 4) : NSPoint(x: 20, y: 20)
+        let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { _ in
+            let path = diagonalArrowPath(from: start, to: end)
+            path.lineCapStyle = .round
+            path.lineJoinStyle = .round
+            NSColor.black.withAlphaComponent(0.72).setStroke()
+            path.lineWidth = 5
+            path.stroke()
+            NSColor.white.setStroke()
+            path.lineWidth = 2
+            path.stroke()
+            return true
+        }
+        return NSCursor(image: image, hotSpot: NSPoint(x: size / 2, y: size / 2))
+    }
+
+    private static func diagonalArrowPath(from start: NSPoint, to end: NSPoint) -> NSBezierPath {
+        let path = NSBezierPath()
+        path.move(to: start)
+        path.line(to: end)
+
+        let dx = end.x - start.x
+        let dy = end.y - start.y
+        let length = max(1, hypot(dx, dy))
+        let ux = dx / length
+        let uy = dy / length
+        let px = -uy
+        let py = ux
+        let arrowLength: CGFloat = 5.5
+        let arrowWidth: CGFloat = 3.4
+
+        for (tip, inward) in [(end, CGFloat(-1)), (start, CGFloat(1))] {
+            let base = NSPoint(
+                x: tip.x + ux * arrowLength * inward,
+                y: tip.y + uy * arrowLength * inward
+            )
+            path.move(to: tip)
+            path.line(to: NSPoint(x: base.x + px * arrowWidth, y: base.y + py * arrowWidth))
+            path.move(to: tip)
+            path.line(to: NSPoint(x: base.x - px * arrowWidth, y: base.y - py * arrowWidth))
+        }
+        return path
+    }
+}
+
+@MainActor
 private enum SelectionGrip: String, CaseIterable {
     case nw, n, ne, w, e, sw, s, se
+
+    var cursor: NSCursor {
+        switch self {
+        case .w, .e:
+            return OverlayCursor.resize(.horizontal)
+        case .n, .s:
+            return OverlayCursor.resize(.vertical)
+        case .nw, .se:
+            return OverlayCursor.resize(.northwestSoutheast)
+        case .ne, .sw:
+            return OverlayCursor.resize(.northeastSouthwest)
+        }
+    }
 }
 
 /// 选区边框与八个调整手柄。
@@ -250,6 +442,14 @@ private struct SelectionResizeChrome: View {
                     .contentShape(Rectangle())
                     .position(point)
                     .gesture(drag(grip))
+                    .onContinuousHover { phase in
+                        switch phase {
+                        case .active:
+                            grip.cursor.set()
+                        case .ended:
+                            NSCursor.arrow.set()
+                        }
+                    }
             }
         }
         .frame(width: screenSize.width, height: screenSize.height, alignment: .topLeading)
@@ -272,6 +472,7 @@ private struct SelectionResizeChrome: View {
     private func drag(_ grip: SelectionGrip) -> some Gesture {
         DragGesture(minimumDistance: 1, coordinateSpace: .named("overlay"))
             .onChanged { value in
+                grip.cursor.set()
                 if controller.overlayResizeOrigin == nil {
                     controller.overlayResizeOrigin = rect
                     controller.overlayResizing = true
@@ -285,6 +486,7 @@ private struct SelectionResizeChrome: View {
                 )
             }
             .onEnded { value in
+                grip.cursor.set()
                 let origin = controller.overlayResizeOrigin ?? rect
                 controller.overlayResizeOrigin = nil
                 controller.overlayResizing = false

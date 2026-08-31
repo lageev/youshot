@@ -349,6 +349,25 @@ struct AnnotationCanvas: View {
             inlineTextEditor(fitted: fitted)
         }
         .frame(width: canvasSize.width, height: canvasSize.height)
+        .onContinuousHover { phase in
+            switch phase {
+            case .active(let location):
+                drag.cursorLocation = location
+                updateCanvasCursor(at: location)
+            case .ended:
+                drag.cursorLocation = nil
+                NSCursor.arrow.set()
+            }
+        }
+        .onChange(of: tool) { _, _ in refreshCanvasCursor() }
+        .onChange(of: controller.strokeWidth) { _, _ in refreshCanvasCursor() }
+        .onChange(of: controller.strokeColorIndex) { _, _ in refreshCanvasCursor() }
+        .onChange(of: controller.strokeCustomHex) { _, _ in refreshCanvasCursor() }
+        .onChange(of: controller.strokeOpacity) { _, _ in refreshCanvasCursor() }
+        .onChange(of: controller.penBrush) { _, _ in refreshCanvasCursor() }
+        .onChange(of: controller.showTextInput) { _, _ in refreshCanvasCursor() }
+        .onChange(of: controller.overlays.map(\.id)) { _, _ in refreshCanvasCursor() }
+        .onChange(of: controller.overlays.map(\.frame)) { _, _ in refreshCanvasCursor() }
     }
 
     @ViewBuilder
@@ -542,6 +561,7 @@ struct AnnotationCanvas: View {
             .onChanged { value in
                 if tool == .watermark { return }
                 if drag.movingID != nil {
+                    NSCursor.closedHand.set()
                     updateMove(to: value.location, fitted: fitted)
                     return
                 }
@@ -549,6 +569,7 @@ struct AnnotationCanvas: View {
                     drag.movingID = item.id
                     drag.moveStartOrigin = item.frame.origin
                     drag.start = value.startLocation
+                    NSCursor.closedHand.set()
                     return
                 }
                 if tool == .text { return }
@@ -573,6 +594,7 @@ struct AnnotationCanvas: View {
                         controller.finishMoveOverlay()
                     }
                     drag.reset()
+                    updateCanvasCursor(at: value.location)
                     return
                 }
                 if tool == .text {
@@ -580,6 +602,7 @@ struct AnnotationCanvas: View {
                         controller.beginTextInput(at: pixel)
                     }
                     drag.reset()
+                    updateCanvasCursor(at: value.startLocation)
                     return
                 }
 
@@ -613,7 +636,52 @@ struct AnnotationCanvas: View {
                 case .text, .watermark:
                     break
                 }
+                updateCanvasCursor(at: value.location)
             }
+    }
+
+    private func refreshCanvasCursor() {
+        guard let cursorLocation = drag.cursorLocation else { return }
+        updateCanvasCursor(at: cursorLocation)
+    }
+
+    /// Resolve cursor semantics in the same priority order as the gesture hit
+    /// testing: outer resize handles, active text edit, movable annotations,
+    /// then the selected drawing tool.
+    private func updateCanvasCursor(at point: CGPoint) {
+        if let resizeCursor = selectionResizeCursor(at: point) {
+            resizeCursor.set()
+            return
+        }
+        if controller.showTextInput {
+            NSCursor.iBeam.set()
+            return
+        }
+        if drag.movingID != nil {
+            NSCursor.closedHand.set()
+            return
+        }
+        let fitted = CGRect(origin: .zero, size: canvasSize)
+        if hitOverlay(at: point, fitted: fitted) != nil {
+            NSCursor.openHand.set()
+            return
+        }
+
+        switch tool {
+        case .text:
+            NSCursor.iBeam.set()
+        case .pen:
+            let color = controller.annotationColor.withAlphaComponent(controller.strokeOpacity)
+            OverlayCursor.pen(color: color, diameter: penStrokeWidth).set()
+        case .watermark:
+            NSCursor.arrow.set()
+        case .rect, .line, .arrow, .highlight, .mosaic, .blur:
+            NSCursor.crosshair.set()
+        }
+    }
+
+    private func selectionResizeCursor(at point: CGPoint) -> NSCursor? {
+        OverlayCursor.resizeCursor(at: point, in: canvasSize)
     }
 
     private func hitOverlay(at point: CGPoint, fitted: CGRect) -> OverlayItem? {
@@ -922,6 +990,7 @@ private final class DragState: ObservableObject {
     var movingID: UUID?
     var moveStartOrigin: CGPoint = .zero
     var moved = false
+    var cursorLocation: CGPoint?
 
     func reset() {
         start = nil

@@ -699,13 +699,16 @@ final class CaptureController: ObservableObject {
                 results = try await captureAllDisplays()
             case .region:
                 // 先选区域，再延迟，再截图
+                // 保存框选层出现前的真实指针。正式截图时不能直接采集
+                // WindowServer 当前指针，否则成品会包含框选十字。
+                let cursor = captureCursorSnapshot()
                 guard let selection = await regionSelector.pick(snapWindows: windowSnapEnabled) else {
                     throw CancellationError()
                 }
                 try Task.checkCancellation()
                 let delayScreen = screen(for: selection.displayID) ?? screenUnderMouse()
                 try await runDelay(on: delayScreen)
-                let captured = try await captureRegionOnFrozenScreen(selection)
+                let captured = try await captureRegionOnFrozenScreen(selection, cursor: cursor)
                 results = [captured.result]
                 lastFileURL = captured.result.url
                 lastPreview = captured.regionImage
@@ -719,7 +722,8 @@ final class CaptureController: ObservableObject {
                     fullImage: captured.fullImage
                 )
                 // 标注层已覆盖在冻结画面上后再撤掉选区层，避免松开鼠标时闪回原画面。
-                regionSelector.dismiss()
+                // 标注层已经接管指针语义，不要用箭头覆盖它刚设置的工具/缩放指针。
+                regionSelector.dismiss(restoreCursor: false)
                 return
             }
 
@@ -847,7 +851,10 @@ final class CaptureController: ObservableObject {
     }
 
     /// 先截整屏作操作区冻结背景，再从同一张图裁出选区保存。
-    private func captureRegionOnFrozenScreen(_ selection: RegionSelection) async throws -> RegionCaptureBundle {
+    private func captureRegionOnFrozenScreen(
+        _ selection: RegionSelection,
+        cursor: CursorSnapshot?
+    ) async throws -> RegionCaptureBundle {
         let nsScreen = screen(for: selection.displayID) ?? screenUnderMouse()
         let content = try await shareableContent()
         guard let display = content.displays.first(where: { $0.displayID == selection.displayID })
@@ -855,9 +862,17 @@ final class CaptureController: ObservableObject {
         else {
             throw CaptureError.noDisplay
         }
-        let full = try await captureImage(display: display, content: content, sourceRect: nil)
-        let scaleX = CGFloat(full.width) / nsScreen.frame.width
-        let scaleY = CGFloat(full.height) / nsScreen.frame.height
+        // Cursor is composited from the trigger-time snapshot below. This keeps
+        // its original arrow/I-beam/etc. instead of capturing the selection
+        // overlay's crosshair.
+        let rawFull = try await captureImage(
+            display: display,
+            content: content,
+            sourceRect: nil,
+            showsCursor: false
+        )
+        let scaleX = CGFloat(rawFull.width) / nsScreen.frame.width
+        let scaleY = CGFloat(rawFull.height) / nsScreen.frame.height
         let pixelRect = CGRect(
             x: selection.displayLocalRect.minX * scaleX,
             y: selection.displayLocalRect.minY * scaleY,
@@ -865,14 +880,27 @@ final class CaptureController: ObservableObject {
             height: selection.displayLocalRect.height * scaleY
         )
         .integral
-        .intersection(CGRect(x: 0, y: 0, width: full.width, height: full.height))
+        .intersection(CGRect(x: 0, y: 0, width: rawFull.width, height: rawFull.height))
         guard pixelRect.width >= 1, pixelRect.height >= 1,
-              let regionCrop = full.cropping(to: pixelRect)
+              let regionCrop = rawFull.cropping(to: pixelRect)
         else {
             throw CaptureError.noDisplay
         }
         // 吸附到窗口时单独采集该窗口，圆角外为透明，避免把窗口投影一起截进来
-        let cropped = await captureWindowImage(selection.windowID, content: content) ?? regionCrop
+        let rawCrop = await captureWindowImage(selection.windowID, content: content) ?? regionCrop
+        let cropped = drawCursor(
+            cursor,
+            onto: rawCrop,
+            screen: nsScreen,
+            displayLocalRect: selection.displayLocalRect
+        )
+        let fullRect = CGRect(origin: .zero, size: nsScreen.frame.size)
+        let full = drawCursor(
+            cursor,
+            onto: rawFull,
+            screen: nsScreen,
+            displayLocalRect: fullRect
+        )
 
         try FileManager.default.createDirectory(at: saveDirectory, withIntermediateDirectories: true)
         let url = saveDirectory.appendingPathComponent("YouShot-\(timestamp()).png")
@@ -931,7 +959,8 @@ final class CaptureController: ObservableObject {
     private func captureImage(
         display: SCDisplay,
         content: SCShareableContent,
-        sourceRect: CGRect?
+        sourceRect: CGRect?,
+        showsCursor: Bool? = nil
     ) async throws -> CGImage {
         // 排除 YouShot 自己的截图遮罩/HUD/标注层，但把当前可见的正常设置窗口加回。
         // 这样既不会把操作层截进去，也能对 YouShot 设置页做整屏、区域或窗口截图。
@@ -970,7 +999,7 @@ final class CaptureController: ObservableObject {
             config.width = Int((filter.contentRect.width * scale).rounded())
             config.height = Int((filter.contentRect.height * scale).rounded())
         }
-        config.showsCursor = includeCursor
+        config.showsCursor = showsCursor ?? includeCursor
         config.capturesAudio = false
         config.pixelFormat = kCVPixelFormatType_32BGRA
         config.captureResolution = .best
@@ -980,6 +1009,74 @@ final class CaptureController: ObservableObject {
             contentFilter: filter,
             configuration: config
         )
+    }
+
+    private func captureCursorSnapshot() -> CursorSnapshot? {
+        guard includeCursor else { return nil }
+        let cursor = NSCursor.current
+        let image = cursor.image
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            return nil
+        }
+        return CursorSnapshot(
+            image: cgImage,
+            size: image.size,
+            hotSpot: cursor.hotSpot,
+            globalLocation: NSEvent.mouseLocation
+        )
+    }
+
+    /// Draw a trigger-time AppKit cursor into an image whose coordinate space
+    /// corresponds to `displayLocalRect` (display-local points, top-left origin).
+    private func drawCursor(
+        _ cursor: CursorSnapshot?,
+        onto image: CGImage,
+        screen: NSScreen,
+        displayLocalRect: CGRect
+    ) -> CGImage {
+        guard let cursor else { return image }
+
+        let cursorInDisplayTopLeft = CGPoint(
+            x: cursor.globalLocation.x - screen.frame.minX,
+            y: screen.frame.maxY - cursor.globalLocation.y
+        )
+        guard displayLocalRect.width > 0, displayLocalRect.height > 0 else { return image }
+        let scaleX = CGFloat(image.width) / displayLocalRect.width
+        let scaleY = CGFloat(image.height) / displayLocalRect.height
+        let selectionBottom = screen.frame.height - displayLocalRect.maxY
+        let cursorBottom = cursor.globalLocation.y - screen.frame.minY
+        let cursorRect = CGRect(
+            x: (cursorInDisplayTopLeft.x - displayLocalRect.minX - cursor.hotSpot.x) * scaleX,
+            // NSCursor hot spots use a flipped, top-left origin. Convert the
+            // vertical offset before drawing into Core Graphics' bottom-left
+            // coordinate system.
+            y: (
+                cursorBottom - selectionBottom
+                    - (cursor.size.height - cursor.hotSpot.y)
+            ) * scaleY,
+            width: cursor.size.width * scaleX,
+            height: cursor.size.height * scaleY
+        )
+        let imageRect = CGRect(x: 0, y: 0, width: image.width, height: image.height)
+        // Cropping a pre-composited full-screen image keeps the visible part of
+        // a cursor that straddles an edge, so mirror that behavior here.
+        guard cursorRect.intersects(imageRect),
+              let colorSpace = image.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                data: nil,
+                width: image.width,
+                height: image.height,
+                bitsPerComponent: 8,
+                bytesPerRow: 0,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              )
+        else { return image }
+
+        context.draw(image, in: imageRect)
+        context.interpolationQuality = .high
+        context.draw(cursor.image, in: cursorRect)
+        return context.makeImage() ?? image
     }
 
     private func shareableContent() async throws -> SCShareableContent {
@@ -1019,6 +1116,13 @@ private struct CaptureResult {
     let url: URL
     let pixelWidth: Int
     let pixelHeight: Int
+}
+
+private struct CursorSnapshot {
+    let image: CGImage
+    let size: CGSize
+    let hotSpot: CGPoint
+    let globalLocation: CGPoint
 }
 
 private struct RegionCaptureBundle {

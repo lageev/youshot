@@ -19,7 +19,6 @@ struct SnapWindowInfo {
 final class RegionSelector {
     private var panels: [NSPanel] = []
     private var continuation: CheckedContinuation<RegionSelection?, Never>?
-    private var cursorHiddenDisplays: [CGDirectDisplayID] = []
 
     func pick(snapWindows: Bool) async -> RegionSelection? {
         await withCheckedContinuation { continuation in
@@ -33,11 +32,15 @@ final class RegionSelector {
     }
 
     /// 有效选区会保留到截图/标注层接管后才关闭，以避免画面短暂露出原桌面。
-    func dismiss() {
+    func dismiss(restoreCursor: Bool = true) {
         panels.forEach { $0.orderOut(nil) }
         panels.removeAll()
-        cursorHiddenDisplays.forEach { CGDisplayShowCursor($0) }
-        cursorHiddenDisplays.removeAll()
+        // Selection views install a full-view crosshair cursor rect. Restore a
+        // normal pointer immediately instead of waiting for the next AppKit
+        // mouse event after the panels disappear.
+        if restoreCursor {
+            NSCursor.arrow.set()
+        }
     }
 
     private func present(snapWindows: Bool) {
@@ -90,24 +93,21 @@ final class RegionSelector {
             panel.acceptsMouseMovedEvents = true
             panel.orderFrontRegardless()
             panel.invalidateCursorRects(for: overlay)
-            overlay.updateSelectionCursor(globalPoint: NSEvent.mouseLocation)
             panels.append(panel)
         }
+        // A non-activating panel can become key without taking focus from the
+        // app being captured. Making the panel under the pointer key gives
+        // WindowServer ownership of its cursor rect, while mouse-event updates
+        // below provide a fallback on the other displays.
         if let panel = panels.first(where: { $0.frame.contains(NSEvent.mouseLocation) }),
-           let overlay = panel.contentView
-        {
+           let overlay = panel.contentView {
+            panel.makeKeyAndOrderFront(nil)
+            panel.makeFirstResponder(overlay)
             panel.invalidateCursorRects(for: overlay)
-        }
-        for screen in NSScreen.screens {
-            let id = UInt32(
-                (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
-            )
-            if CGDisplayHideCursor(id) == .success {
-                cursorHiddenDisplays.append(id)
-            }
+            NSCursor.crosshair.set()
         }
         // 保持目标应用为前台：部分应用的设置面板会在失焦后自动关闭。
-        // 非激活面板仍可接收鼠标事件；取消操作由全局 Esc 热键处理。
+        // key 的非激活面板仍可接收鼠标事件；取消操作由全局 Esc 热键处理。
     }
 
     private func finish(_ selection: RegionSelection?) {
@@ -187,8 +187,6 @@ private final class RegionOverlayView: NSView {
     private let dimLayer = CAShapeLayer()
     private let borderLayer = CAShapeLayer()
     private let snapLayer = CAShapeLayer()
-    private let cursorOutlineLayer = CAShapeLayer()
-    private let cursorLayer = CAShapeLayer()
     private let sizeLabel = NSTextField(labelWithString: "")
 
     override var acceptsFirstResponder: Bool { true }
@@ -226,32 +224,6 @@ private final class RegionOverlayView: NSView {
         sizeLabel.isBezeled = false
         sizeLabel.isHidden = true
         addSubview(sizeLabel)
-
-        let cursorPath = CGMutablePath()
-        cursorPath.move(to: CGPoint(x: -11, y: 0))
-        cursorPath.addLine(to: CGPoint(x: -3, y: 0))
-        cursorPath.move(to: CGPoint(x: 3, y: 0))
-        cursorPath.addLine(to: CGPoint(x: 11, y: 0))
-        cursorPath.move(to: CGPoint(x: 0, y: -11))
-        cursorPath.addLine(to: CGPoint(x: 0, y: -3))
-        cursorPath.move(to: CGPoint(x: 0, y: 3))
-        cursorPath.addLine(to: CGPoint(x: 0, y: 11))
-
-        cursorOutlineLayer.path = cursorPath
-        cursorOutlineLayer.fillColor = NSColor.clear.cgColor
-        cursorOutlineLayer.strokeColor = NSColor.black.withAlphaComponent(0.85).cgColor
-        cursorOutlineLayer.lineWidth = 3
-        cursorOutlineLayer.lineCap = .round
-        cursorOutlineLayer.zPosition = 100
-        layer?.addSublayer(cursorOutlineLayer)
-
-        cursorLayer.path = cursorPath
-        cursorLayer.fillColor = NSColor.clear.cgColor
-        cursorLayer.strokeColor = NSColor.white.cgColor
-        cursorLayer.lineWidth = 1
-        cursorLayer.lineCap = .round
-        cursorLayer.zPosition = 101
-        layer?.addSublayer(cursorLayer)
     }
 
     @available(*, unavailable)
@@ -262,7 +234,6 @@ private final class RegionOverlayView: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         window?.acceptsMouseMovedEvents = true
-        updateSelectionCursor(globalPoint: NSEvent.mouseLocation)
     }
 
     override func updateTrackingAreas() {
@@ -271,21 +242,34 @@ private final class RegionOverlayView: NSView {
         addTrackingArea(
             NSTrackingArea(
                 rect: bounds,
-                options: [.activeAlways, .mouseMoved, .inVisibleRect],
+                options: [.activeAlways, .mouseMoved, .mouseEnteredAndExited, .cursorUpdate, .inVisibleRect],
                 owner: self,
                 userInfo: nil
             )
         )
     }
 
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(bounds, cursor: .crosshair)
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        NSCursor.crosshair.set()
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        NSCursor.crosshair.set()
+    }
+
     override func mouseMoved(with event: NSEvent) {
-        updateSelectionCursor(localPoint: convert(event.locationInWindow, from: nil))
+        NSCursor.crosshair.set()
         guard snapEnabled, !isDragging, startPoint == nil else { return }
         updateHover(at: convert(event.locationInWindow, from: nil))
     }
 
     override func mouseDown(with event: NSEvent) {
-        updateSelectionCursor(localPoint: convert(event.locationInWindow, from: nil))
+        NSCursor.crosshair.set()
         // Option 临时关闭吸附
         let ignoreSnap = event.modifierFlags.contains(.option)
         startPoint = convert(event.locationInWindow, from: nil)
@@ -300,7 +284,7 @@ private final class RegionOverlayView: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        updateSelectionCursor(localPoint: convert(event.locationInWindow, from: nil))
+        NSCursor.crosshair.set()
         guard let startPoint else { return }
         let point = convert(event.locationInWindow, from: nil)
         let distance = hypot(point.x - startPoint.x, point.y - startPoint.y)
@@ -318,7 +302,7 @@ private final class RegionOverlayView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        updateSelectionCursor(localPoint: convert(event.locationInWindow, from: nil))
+        NSCursor.crosshair.set()
         defer {
             if !preservesVisualsAfterSelection {
                 startPoint = nil
@@ -369,23 +353,6 @@ private final class RegionOverlayView: NSView {
         // 列表前到后为前台到后台，取第一个包含点的窗口
         hoverWindow = snapWindows.first { $0.frame.contains(globalPoint) }
         updateVisuals()
-    }
-
-    func updateSelectionCursor(globalPoint: CGPoint) {
-        guard let window else { return }
-        let windowPoint = window.convertFromScreen(NSRect(origin: globalPoint, size: .zero)).origin
-        updateSelectionCursor(localPoint: convert(windowPoint, from: nil))
-    }
-
-    private func updateSelectionCursor(localPoint: CGPoint) {
-        let visible = bounds.contains(localPoint)
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        cursorOutlineLayer.position = localPoint
-        cursorLayer.position = localPoint
-        cursorOutlineLayer.isHidden = !visible
-        cursorLayer.isHidden = !visible
-        CATransaction.commit()
     }
 
     private func updateVisuals() {

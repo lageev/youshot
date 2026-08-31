@@ -1,0 +1,112 @@
+# YouShot
+
+YouShot 是一款原生 macOS 菜单栏截图工具，支持当前屏幕、全部屏幕、窗口吸附和自由区域截图，并可在截图原位置直接完成标注。
+
+截图使用 ScreenCaptureKit，以显示器原生像素输出无损 PNG；窗口截图支持透明背景、圆角和阴影配置。
+
+## 功能
+
+- 当前屏幕、全部屏幕、自由区域截图
+- 窗口悬停吸附与单击选取，按住 `⌥` 可临时关闭吸附
+- 区域截图完成后，在原位置直接进入标注层
+- 矩形、椭圆、直线、箭头、画笔、文字、高亮、马赛克、模糊和水印
+- 标注颜色、粗细、透明度、笔刷样式和文字背景可调
+- 图形与文字绘制后可拖动，支持撤销与重做
+- 八向选区调整及与操作语义匹配的鼠标指针
+- 多显示器与 Retina 原生像素输出
+- 透明 PNG、圆角、阴影、剪贴板写入
+- 0–60 秒延迟截图
+- 可自定义全局快捷键
+
+## 系统要求
+
+- macOS 14 Sonoma 或更高版本
+- Xcode，或带 macOS SDK 的 Swift 6 工具链
+- 屏幕录制权限
+
+首次截图时，请前往：
+
+> 系统设置 → 隐私与安全性 → 屏幕录制
+
+允许 YouShot 录制屏幕。修改权限后可能需要重新启动应用。
+
+## 构建与运行
+
+### Xcode
+
+```bash
+open YouShot.xcodeproj
+```
+
+选择共享的 `YouShot` Scheme，运行目标选择 `My Mac`，然后按 `⌘R`。
+
+### 命令行
+
+```bash
+./scripts/build.sh
+open dist/YouShot.app
+```
+
+也可以仅验证 Swift Package 构建：
+
+```bash
+swift build
+swift build -c release
+```
+
+## 使用方法
+
+启动后，YouShot 会常驻菜单栏，不显示 Dock 图标。
+
+1. 从菜单栏选择截图模式，或使用全局快捷键。
+2. 区域模式下，悬停窗口可吸附，单击选取窗口；拖动则进行自由框选。
+3. 如设置了延迟，选区完成后开始倒计时。
+4. 截图完成后会在原位置显示标注层。
+5. 点击绿色勾完成并保存，也可以复制到剪贴板。
+
+按 `Esc` 可以取消选区、倒计时或标注；文字输入过程中按 `Esc` 会优先取消输入。
+
+## 默认快捷键
+
+| 操作 | 快捷键 |
+| --- | --- |
+| 当前屏幕 | `⌥⇧⌘3` |
+| 区域截图 | `⌥⇧⌘4` |
+| 全部屏幕 | `⌥⇧⌘5` |
+
+快捷键可以在「设置 → 快捷键」中重新录制。
+
+标注时，画笔、直线和箭头按住 `⇧` 可吸附为水平、垂直或 45° 直线；矩形和椭圆按住 `⇧` 可绘制正方形或正圆。
+
+## 输出
+
+- 默认保存为无损 PNG
+- 输出尺寸为 `截图点尺寸 × 显示器像素比例`
+- 保存后自动写入剪贴板
+- 窗口吸附截图使用独立窗口采集，可保留透明圆角并排除系统投影
+- 可选择是否在成品中包含触发截图时的鼠标指针
+
+## 项目结构
+
+```text
+Sources/YouShot/
+├── YouShotApp.swift          # 菜单栏、设置窗口、热键注册
+├── ContentView.swift         # 多标签设置界面
+├── CaptureController.swift   # 截图、保存、编辑状态
+├── RegionSelector.swift      # 区域选择与窗口吸附
+├── AnnotationOverlay.swift   # 原位置全屏标注层
+├── EditorView.swift          # 标注画布、工具栏、文字输入
+├── AnnotationRenderer.swift  # 标注模型与渲染
+├── ImageMosaic.swift         # 马赛克、模糊、PNG 写入
+├── AppSettings.swift         # 设置持久化
+├── HotKeyManager.swift       # Carbon 全局热键
+├── KeyChord.swift            # 快捷键模型
+└── CaptureMode.swift         # 截图模式
+```
+
+## 参考项目
+
+YouShot 的截图交互和鼠标指针处理参考了以下优秀开源项目：
+
+- [macshot](https://github.com/sw33tLie/macshot)
+- [capcap](https://github.com/realskyrin/capcap)
