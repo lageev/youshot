@@ -20,6 +20,7 @@ struct FloatingAnnotateToolbar: View {
                 iconButton("arrow.uturn.backward", enabled: controller.canUndoEditor) { controller.undoEditor() }
                 iconButton("arrow.uturn.forward", enabled: controller.canRedoEditor) { controller.redoEditor() }
                 iconButton("square.and.arrow.down", enabled: true) { controller.saveEditor() }
+                    .help("保存 PNG 到图片/YouShot")
 
                 toolbarDivider
 
@@ -37,7 +38,7 @@ struct FloatingAnnotateToolbar: View {
                         .foregroundStyle(.white, .green)
                 }
                 .buttonStyle(.plain)
-                .help("完成")
+                .help("复制到剪贴板并完成")
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
@@ -518,9 +519,9 @@ struct AnnotationCanvas: View {
                         .fill(.white)
                         .overlay(alignment: .topLeading) {
                             ForEach(Array(holes.enumerated()), id: \.offset) { _, hole in
-                                Rectangle()
-                                    .frame(width: hole.width, height: hole.height)
-                                    .offset(x: hole.minX, y: hole.minY)
+                                RoundedRectangle(cornerRadius: hole.radius, style: .circular)
+                                    .frame(width: hole.rect.width, height: hole.rect.height)
+                                    .offset(x: hole.rect.minX, y: hole.rect.minY)
                                     .blendMode(.destinationOut)
                             }
                         }
@@ -530,10 +531,31 @@ struct AnnotationCanvas: View {
         }
     }
 
-    private func highlightHoles(fitted: CGRect) -> [CGRect] {
-        var holes = controller.highlightRects.compactMap { toViewRect($0, fitted: fitted) }
-        if tool == .highlight, let rect = previewRect(fitted: fitted) {
-            holes.append(rect)
+    private func highlightHoles(fitted: CGRect) -> [HighlightHole] {
+        var holes = controller.highlightRects.compactMap { pixelRect -> HighlightHole? in
+            guard let viewRect = toViewRect(pixelRect, fitted: fitted) else { return nil }
+            return HighlightHole(
+                rect: viewRect,
+                radius: viewLength(
+                    AnnotationRenderer.highlightCornerRadius(for: pixelRect),
+                    fitted: fitted
+                )
+            )
+        }
+        if tool == .highlight,
+           let start = drag.start,
+           let current = drag.current,
+           let pixelRect = pixelRect(from: start, to: current, fitted: fitted),
+           let viewRect = toViewRect(pixelRect, fitted: fitted) {
+            holes.append(
+                HighlightHole(
+                    rect: viewRect,
+                    radius: viewLength(
+                        AnnotationRenderer.highlightCornerRadius(for: pixelRect),
+                        fitted: fitted
+                    )
+                )
+            )
         }
         return holes
     }
@@ -980,6 +1002,11 @@ final class CustomColorPanel: NSObject {
     @objc private func colorChanged(_ sender: NSColorPanel) {
         onChange?(AnnotationPalette.hex(from: sender.color))
     }
+}
+
+private struct HighlightHole {
+    let rect: CGRect
+    let radius: CGFloat
 }
 
 @MainActor

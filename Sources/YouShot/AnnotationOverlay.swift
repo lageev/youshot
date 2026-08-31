@@ -232,8 +232,19 @@ struct AnnotationOverlayRoot: View {
             .font(.system(size: 11, weight: .semibold).monospacedDigit())
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(Color.white, in: RoundedRectangle(cornerRadius: 6))
-            .shadow(radius: 2)
+            .background {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(.thickMaterial)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color(nsColor: .windowBackgroundColor).opacity(0.86))
+                    }
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+                    }
+                    .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
+            }
     }
 
     private var toolbarCenterX: CGFloat {
@@ -253,10 +264,9 @@ struct AnnotationOverlayRoot: View {
     }
 }
 
-/// Central cursor palette for the capture/editor overlay. AppKit's standard
-/// cursors are used whenever they express the action accurately; diagonal
-/// resize cursors are drawn as resolution-independent NSImages on macOS 14,
-/// where AppKit does not expose the native frame-resize variants publicly.
+/// Central cursor palette for the capture/editor overlay.
+/// `NSCursor.frameResize` stays diagonal until the mouse is down, so hover
+/// uses explicit directional cursors instead.
 @MainActor
 enum OverlayCursor {
     enum ResizeDirection {
@@ -271,19 +281,6 @@ enum OverlayCursor {
     private static let northeastSouthwest = diagonalResizeCursor(descending: false)
 
     static func resize(_ direction: ResizeDirection) -> NSCursor {
-        if #available(macOS 15.0, *) {
-            switch direction {
-            case .horizontal:
-                return .frameResize(position: .left, directions: .all)
-            case .vertical:
-                return .frameResize(position: .top, directions: .all)
-            case .northwestSoutheast:
-                return .frameResize(position: .topLeft, directions: .all)
-            case .northeastSouthwest:
-                return .frameResize(position: .topRight, directions: .all)
-            }
-        }
-
         switch direction {
         case .horizontal: return .resizeLeftRight
         case .vertical: return .resizeUpDown
@@ -345,9 +342,11 @@ enum OverlayCursor {
             (CGPoint(x: size.width / 2, y: size.height), .vertical),
             (CGPoint(x: size.width, y: size.height), .northwestSoutheast),
         ]
-        guard let target = targets.first(where: {
-            abs($0.0.x - point.x) <= hitRadius && abs($0.0.y - point.y) <= hitRadius
+        guard let target = targets.min(by: {
+            hypot($0.0.x - point.x, $0.0.y - point.y) < hypot($1.0.x - point.x, $1.0.y - point.y)
         }) else { return nil }
+        let distance = hypot(target.0.x - point.x, target.0.y - point.y)
+        guard distance <= hitRadius else { return nil }
         return resize(target.1)
     }
 
@@ -445,7 +444,7 @@ private struct SelectionResizeChrome: View {
                     .onContinuousHover { phase in
                         switch phase {
                         case .active:
-                            grip.cursor.set()
+                            (hoverCursor() ?? grip.cursor).set()
                         case .ended:
                             NSCursor.arrow.set()
                         }
@@ -454,6 +453,17 @@ private struct SelectionResizeChrome: View {
         }
         .frame(width: screenSize.width, height: screenSize.height, alignment: .topLeading)
         .contentShape(HandleHitShape(rect: rect))
+    }
+
+    private func hoverCursor() -> NSCursor? {
+        guard let window = NSApp.windows.first(where: { $0 is OverlayPanel }) else { return nil }
+        let global = NSEvent.mouseLocation
+        let overlay = CGPoint(
+            x: global.x - window.frame.minX,
+            y: window.frame.maxY - global.y
+        )
+        let local = CGPoint(x: overlay.x - rect.minX, y: overlay.y - rect.minY)
+        return OverlayCursor.resizeCursor(at: local, in: rect.size)
     }
 
     private func position(for grip: SelectionGrip) -> CGPoint {

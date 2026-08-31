@@ -536,11 +536,26 @@ enum AnnotationRenderer {
             ctx.fill(CGRect(x: 0, y: 0, width: CGFloat(image.width), height: height))
             ctx.setBlendMode(.clear)
             for rect in rects {
-                ctx.fill(bottomLeft(rect, height: height))
+                let converted = bottomLeft(rect, height: height)
+                let radius = highlightCornerRadius(for: rect)
+                ctx.addPath(
+                    CGPath(
+                        roundedRect: converted,
+                        cornerWidth: radius,
+                        cornerHeight: radius,
+                        transform: nil
+                    )
+                )
+                ctx.fillPath()
             }
             ctx.setBlendMode(.normal)
             ctx.endTransparencyLayer()
         }
+    }
+
+    /// 高亮选区圆角（截图像素），小选区自动收紧，避免退化成胶囊形。
+    static func highlightCornerRadius(for rect: CGRect) -> CGFloat {
+        min(12, min(rect.width, rect.height) / 4)
     }
 
     static func drawText(

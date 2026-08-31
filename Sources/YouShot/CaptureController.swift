@@ -287,7 +287,7 @@ final class CaptureController: ObservableObject {
         overlays.append(
             .shape(kind, frame: pixelRect, color: annotationColor, lineWidth: strokePixelWidth)
         )
-        persistEditorImage()
+        refreshEditorPreview()
     }
 
     func applyLine(from: CGPoint, to: CGPoint) {
@@ -364,7 +364,7 @@ final class CaptureController: ObservableObject {
                         backdropColor: textBackdropColor
                     )
                 )
-                persistEditorImage()
+                refreshEditorPreview()
             }
         }
         showTextInput = false
@@ -384,7 +384,7 @@ final class CaptureController: ObservableObject {
     }
 
     func finishMoveOverlay() {
-        persistEditorImage()
+        refreshEditorPreview()
     }
 
     func cancelTextInput() {
@@ -400,7 +400,7 @@ final class CaptureController: ObservableObject {
         case .highlight:
             pushHistory()
             highlightRects.append(pixelRect)
-            persistEditorImage()
+            refreshEditorPreview()
         case .blur:
             commitEdit {
                 ImageRedact.applyBlur(
@@ -432,28 +432,36 @@ final class CaptureController: ObservableObject {
         let styled = NSImage(youshotCGImage: styledExport(flattened(cg)))
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        if let url = editorURL {
-            pasteboard.writeObjects([url as NSURL])
-        }
         pasteboard.writeObjects([styled])
+        lastPreview = styled
         statusMessage = "已复制到剪贴板"
         hasError = false
     }
 
     func saveEditor() {
-        persistFinalImage()
-        if let url = editorURL {
+        guard let image = editorImage, let cg = image.youshotCGImage else { return }
+        let styled = styledExport(flattened(cg))
+        do {
+            try FileManager.default.createDirectory(at: saveDirectory, withIntermediateDirectories: true)
+            let url = editorURL
+                ?? saveDirectory.appendingPathComponent("YouShot-\(timestamp()).png")
+            try PNGFile.write(styled, to: url)
+            editorURL = url
             lastFileURL = url
-            copyEditor()
-            statusMessage = "已保存并复制"
+            lastPreview = NSImage(youshotCGImage: styled)
+            statusMessage = "已保存到 图片/YouShot"
             hasError = false
-            flashToast("已保存到 图片/YouShot 并复制")
+            flashToast("已保存到 图片/YouShot")
+        } catch {
+            statusMessage = error.localizedDescription
+            hasError = true
+            flashToast("保存失败")
         }
     }
 
-    /// 完成：保存、复制并关闭
+    /// 完成：只复制最终图片并关闭；文件仅由下载按钮显式写入。
     func confirmEditor() {
-        saveEditor()
+        copyEditor()
         closeEditor()
     }
 
@@ -463,7 +471,7 @@ final class CaptureController: ObservableObject {
             editorImage = base
             highlightRects.removeAll()
             overlays.removeAll()
-            persistEditorImage()
+            lastPreview = base
         }
         closeEditor()
         statusMessage = "已取消编辑"
@@ -525,7 +533,7 @@ final class CaptureController: ObservableObject {
         guard let result = transform(cg) else { return }
         pushHistory()
         editorImage = NSImage(youshotCGImage: result)
-        persistEditorImage()
+        refreshEditorPreview()
     }
 
     private func pushHistory() {
@@ -542,7 +550,7 @@ final class CaptureController: ObservableObject {
         overlays = snapshot.overlays
         canUndoEditor = !editorUndoStack.isEmpty
         canRedoEditor = !editorRedoStack.isEmpty
-        persistEditorImage()
+        refreshEditorPreview()
     }
 
     /// 把高亮遮罩与可拖动标注合入图片
@@ -571,18 +579,11 @@ final class CaptureController: ObservableObject {
         }
     }
 
-    private func persistEditorImage() {
-        guard let image = editorImage, let cg = image.youshotCGImage, let url = editorURL else { return }
+    /// 仅刷新内存预览；编辑过程不写入磁盘。
+    private func refreshEditorPreview() {
+        guard let image = editorImage, let cg = image.youshotCGImage else { return }
         let flat = flattened(cg)
         lastPreview = NSImage(youshotCGImage: flat)
-        try? PNGFile.write(flat, to: url)
-    }
-
-    private func persistFinalImage() {
-        guard let image = editorImage, let cg = image.youshotCGImage, let url = editorURL else { return }
-        let styled = styledExport(flattened(cg))
-        try? PNGFile.write(styled, to: url)
-        lastPreview = NSImage(youshotCGImage: styled)
     }
 
     private func styledExport(_ image: CGImage, scale: CGFloat? = nil) -> CGImage {
@@ -631,12 +632,11 @@ final class CaptureController: ObservableObject {
         overlays.removeAll()
         editorBaseImage = image
         editorImage = image
-        persistEditorImage()
+        refreshEditorPreview()
     }
 
     private func presentEditor(
         image: NSImage,
-        url: URL,
         screenFrame: CGRect,
         selectionFrame: CGRect,
         backdrop: NSImage,
@@ -650,14 +650,13 @@ final class CaptureController: ObservableObject {
         overlays.removeAll()
         editorBaseImage = image
         editorImage = image
-        editorURL = url
+        editorURL = nil
         editorBackdrop = backdrop
         editorBackdropCG = fullImage
         editorHostScreenFrame = screenFrame
         editorSelectionFrame = selectionFrame
         editorTool = .rect
         lastPreview = image
-        lastFileURL = url
         overlaySelection = CGRect(
             x: selectionFrame.minX - screenFrame.minX,
             y: screenFrame.maxY - selectionFrame.maxY,
@@ -698,24 +697,27 @@ final class CaptureController: ObservableObject {
                 try await runDelay(on: screenUnderMouse())
                 results = try await captureAllDisplays()
             case .region:
-                // 先选区域，再延迟，再截图
-                // 保存框选层出现前的真实指针。正式截图时不能直接采集
-                // WindowServer 当前指针，否则成品会包含框选十字。
-                let cursor = captureCursorSnapshot()
-                guard let selection = await regionSelector.pick(snapWindows: windowSnapEnabled) else {
+                // 在任何选区面板出现前冻结所有屏幕。菜单、Popover、Spotlight、
+                // Raycast 等失焦即消失的界面仍会留在冻结帧里供选择和裁剪。
+                let context = try await makeRegionCaptureContext()
+                guard let selection = await regionSelector.pick(
+                    snapWindows: windowSnapEnabled,
+                    frozenFrames: context.frames
+                ) else {
                     throw CancellationError()
                 }
                 try Task.checkCancellation()
                 let delayScreen = screen(for: selection.displayID) ?? screenUnderMouse()
                 try await runDelay(on: delayScreen)
-                let captured = try await captureRegionOnFrozenScreen(selection, cursor: cursor)
-                results = [captured.result]
-                lastFileURL = captured.result.url
+                let captured = try await captureRegionOnFrozenScreen(
+                    selection,
+                    context: context,
+                    useTriggerFrame: delaySeconds == 0
+                )
                 lastPreview = captured.regionImage
-                finishIdle(message: "在截图位置继续标注，完成后点绿色勾")
+                finishIdle(message: "标注后点绿色勾复制，点下载保存文件")
                 presentEditor(
                     image: captured.regionImage,
-                    url: captured.result.url,
                     screenFrame: captured.screen.frame,
                     selectionFrame: globalFrame(for: selection),
                     backdrop: captured.backdrop,
@@ -850,27 +852,35 @@ final class CaptureController: ObservableObject {
         )
     }
 
-    /// 先截整屏作操作区冻结背景，再从同一张图裁出选区保存。
+    /// 使用整屏冻结图作为操作区背景，并在零延迟时从同一张图裁出选区保存。
     private func captureRegionOnFrozenScreen(
         _ selection: RegionSelection,
-        cursor: CursorSnapshot?
+        context: RegionCaptureContext,
+        useTriggerFrame: Bool
     ) async throws -> RegionCaptureBundle {
         let nsScreen = screen(for: selection.displayID) ?? screenUnderMouse()
-        let content = try await shareableContent()
-        guard let display = content.displays.first(where: { $0.displayID == selection.displayID })
-                ?? content.displays.first
-        else {
-            throw CaptureError.noDisplay
+        let content: SCShareableContent
+        let rawFull: CGImage
+        if useTriggerFrame, let frozen = context.frames[selection.displayID] {
+            content = context.content
+            rawFull = frozen
+        } else {
+            content = try await shareableContent()
+            guard let display = content.displays.first(where: { $0.displayID == selection.displayID })
+                    ?? content.displays.first
+            else {
+                throw CaptureError.noDisplay
+            }
+            // Cursor is composited from the trigger-time snapshot below. This keeps
+            // its original arrow/I-beam/etc. instead of capturing the selection
+            // overlay's crosshair.
+            rawFull = try await captureImage(
+                display: display,
+                content: content,
+                sourceRect: nil,
+                showsCursor: false
+            )
         }
-        // Cursor is composited from the trigger-time snapshot below. This keeps
-        // its original arrow/I-beam/etc. instead of capturing the selection
-        // overlay's crosshair.
-        let rawFull = try await captureImage(
-            display: display,
-            content: content,
-            sourceRect: nil,
-            showsCursor: false
-        )
         let scaleX = CGFloat(rawFull.width) / nsScreen.frame.width
         let scaleY = CGFloat(rawFull.height) / nsScreen.frame.height
         let pixelRect = CGRect(
@@ -889,30 +899,49 @@ final class CaptureController: ObservableObject {
         // 吸附到窗口时单独采集该窗口，圆角外为透明，避免把窗口投影一起截进来
         let rawCrop = await captureWindowImage(selection.windowID, content: content) ?? regionCrop
         let cropped = drawCursor(
-            cursor,
+            context.cursor,
             onto: rawCrop,
             screen: nsScreen,
             displayLocalRect: selection.displayLocalRect
         )
         let fullRect = CGRect(origin: .zero, size: nsScreen.frame.size)
         let full = drawCursor(
-            cursor,
+            context.cursor,
             onto: rawFull,
             screen: nsScreen,
             displayLocalRect: fullRect
         )
 
-        try FileManager.default.createDirectory(at: saveDirectory, withIntermediateDirectories: true)
-        let url = saveDirectory.appendingPathComponent("YouShot-\(timestamp()).png")
-        try PNGFile.write(cropped, to: url)
-
         return RegionCaptureBundle(
-            result: CaptureResult(url: url, pixelWidth: cropped.width, pixelHeight: cropped.height),
             regionImage: NSImage(youshotCGImage: cropped),
             backdrop: NSImage(cgImage: full, size: nsScreen.frame.size),
             fullImage: full,
             screen: nsScreen
         )
+    }
+
+    /// 触发瞬间建立区域截图上下文。必须在选区面板创建前执行，避免临时窗口
+    /// 因 key window 或鼠标点击变化而消失。单屏失败不会拖累其他显示器，选中
+    /// 缺失帧的屏幕时会回退到常规实时采集。
+    private func makeRegionCaptureContext() async throws -> RegionCaptureContext {
+        let cursor = captureCursorSnapshot()
+        let content = try await shareableContent(onScreenWindowsOnly: true)
+        var frames: [CGDirectDisplayID: CGImage] = [:]
+
+        for screen in NSScreen.screens {
+            try Task.checkCancellation()
+            let id = displayID(of: screen)
+            guard let display = content.displays.first(where: { $0.displayID == id }) else { continue }
+            if let image = try? await captureImage(
+                display: display,
+                content: content,
+                sourceRect: nil,
+                showsCursor: false
+            ) {
+                frames[id] = image
+            }
+        }
+        return RegionCaptureContext(content: content, frames: frames, cursor: cursor)
     }
 
     private func capture(
@@ -1079,14 +1108,17 @@ final class CaptureController: ObservableObject {
         return context.makeImage() ?? image
     }
 
-    private func shareableContent() async throws -> SCShareableContent {
+    private func shareableContent(onScreenWindowsOnly: Bool = false) async throws -> SCShareableContent {
         if !CGPreflightScreenCaptureAccess() {
             throw CaptureError.permissionDenied
         }
         do {
             // 区域选取层会保留到冻结截图完成。目标窗口此时可能被全屏遮罩完全覆盖，
             // 因此需要包含全部窗口，才能继续按 windowID 完成透明窗口采集。
-            return try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+            return try await SCShareableContent.excludingDesktopWindows(
+                false,
+                onScreenWindowsOnly: onScreenWindowsOnly
+            )
         } catch {
             throw CaptureError.permissionDenied
         }
@@ -1125,8 +1157,13 @@ private struct CursorSnapshot {
     let globalLocation: CGPoint
 }
 
+private struct RegionCaptureContext {
+    let content: SCShareableContent
+    let frames: [CGDirectDisplayID: CGImage]
+    let cursor: CursorSnapshot?
+}
+
 private struct RegionCaptureBundle {
-    let result: CaptureResult
     let regionImage: NSImage
     let backdrop: NSImage
     let fullImage: CGImage

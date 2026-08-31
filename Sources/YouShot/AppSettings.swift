@@ -27,7 +27,7 @@ enum AppSettings {
     static var blurSigma: Double {
         get {
             let value = UserDefaults.standard.object(forKey: blurSigmaKey) as? Double
-            return value ?? 18
+            return value ?? 17
         }
         set { UserDefaults.standard.set(newValue, forKey: blurSigmaKey) }
     }
@@ -35,7 +35,7 @@ enum AppSettings {
     static var blurFeather: Double {
         get {
             let value = UserDefaults.standard.object(forKey: blurFeatherKey) as? Double
-            return value ?? 40
+            return value ?? 52
         }
         set { UserDefaults.standard.set(newValue, forKey: blurFeatherKey) }
     }

@@ -11,6 +11,8 @@ struct RegionSelection: Sendable {
 
 struct SnapWindowInfo {
     let id: CGWindowID
+    /// 高层级菜单/浮层依赖屏幕合成后的背景，不能再按独立窗口采集。
+    let captureWindowID: CGWindowID?
     let frame: CGRect // Cocoa 全局坐标
     let title: String
 }
@@ -20,10 +22,13 @@ final class RegionSelector {
     private var panels: [NSPanel] = []
     private var continuation: CheckedContinuation<RegionSelection?, Never>?
 
-    func pick(snapWindows: Bool) async -> RegionSelection? {
+    func pick(
+        snapWindows: Bool,
+        frozenFrames: [CGDirectDisplayID: CGImage] = [:]
+    ) async -> RegionSelection? {
         await withCheckedContinuation { continuation in
             self.continuation = continuation
-            present(snapWindows: snapWindows)
+            present(snapWindows: snapWindows, frozenFrames: frozenFrames)
         }
     }
 
@@ -43,13 +48,19 @@ final class RegionSelector {
         }
     }
 
-    private func present(snapWindows: Bool) {
+    private func present(
+        snapWindows: Bool,
+        frozenFrames: [CGDirectDisplayID: CGImage]
+    ) {
         let snapList = snapWindows ? Self.collectSnapWindows() : []
 
         for screen in NSScreen.screens {
-            let overlay = RegionOverlayView(frame: screen.frame)
             let displayID = UInt32(
                 (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
+            )
+            let overlay = RegionOverlayView(
+                frame: screen.frame,
+                frozenFrame: frozenFrames[displayID]
             )
             overlay.snapWindows = snapList
             overlay.snapEnabled = snapWindows
@@ -82,12 +93,20 @@ final class RegionSelector {
             panel.becomesKeyOnlyIfNeeded = true
             panel.worksWhenModal = true
             panel.level = .screenSaver
+            // 冻结帧覆盖整屏后，NSPanel 默认的入场/Space 联动动画会让
+            // 画面看起来整体漂移。选区层必须在原位置无动画瞬时出现。
+            panel.animationBehavior = .none
             panel.backgroundColor = .clear
             panel.isOpaque = false
             panel.hasShadow = false
             panel.hidesOnDeactivate = false
             panel.ignoresMouseEvents = false
-            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+            panel.collectionBehavior = [
+                .canJoinAllSpaces,
+                .fullScreenAuxiliary,
+                .stationary,
+                .ignoresCycle,
+            ]
             panel.sharingType = .none
             panel.contentView = overlay
             panel.acceptsMouseMovedEvents = true
@@ -134,10 +153,23 @@ final class RegionSelector {
             return []
         }
 
+        let selectableLayers = Set([
+            CGWindowLevelForKey(.normalWindow),
+            CGWindowLevelForKey(.floatingWindow),
+            CGWindowLevelForKey(.modalPanelWindow),
+            CGWindowLevelForKey(.utilityWindow),
+            CGWindowLevelForKey(.popUpMenuWindow),
+        ].map(Int.init))
+        let primaryScreenArea = NSScreen.screens.first.map {
+            $0.frame.width * $0.frame.height
+        } ?? 0
+
         var result: [SnapWindowInfo] = []
         for info in infoList {
             guard let number = (info[kCGWindowNumber as String] as? NSNumber)?.uint32Value else { continue }
-            guard let layer = info[kCGWindowLayer as String] as? Int, layer == 0 else { continue }
+            guard let layer = info[kCGWindowLayer as String] as? Int,
+                  selectableLayers.contains(layer)
+            else { continue }
             let alpha = (info[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1
             guard alpha > 0.05 else { continue }
             let owner = info[kCGWindowOwnerName as String] as? String ?? ""
@@ -147,13 +179,28 @@ final class RegionSelector {
             let y = (bounds["Y"] as? NSNumber)?.doubleValue ?? 0
             let w = (bounds["Width"] as? NSNumber)?.doubleValue ?? 0
             let h = (bounds["Height"] as? NSNumber)?.doubleValue ?? 0
-            guard w >= 40, h >= 40 else { continue }
+            guard w >= 8, h >= 8 else { continue }
+            // 输入法背景等 WindowServer 高层透明面可能覆盖近乎整屏，若参与
+            // 命中测试会挡住其下方真正需要选择的窗口。
+            if layer >= 20, primaryScreenArea > 0, w * h > primaryScreenArea * 0.8 {
+                continue
+            }
 
             let quartz = CGRect(x: x, y: y, width: w, height: h)
             let cocoa = cocoaFrame(fromQuartz: quartz)
             let title = info[kCGWindowName as String] as? String
             let label = (title?.isEmpty == false) ? (title ?? owner) : owner
-            result.append(SnapWindowInfo(id: number, frame: cocoa, title: label))
+            // Popup-menu 等高层窗口通常带有透明/模糊背景，并且会在失焦时
+            // 立即销毁。它们必须从触发瞬间的整屏合成帧裁剪。
+            let captureWindowID = layer >= 20 ? nil : number
+            result.append(
+                SnapWindowInfo(
+                    id: number,
+                    captureWindowID: captureWindowID,
+                    frame: cocoa,
+                    title: label
+                )
+            )
         }
         return result
     }
@@ -184,6 +231,7 @@ private final class RegionOverlayView: NSView {
     private var hoverWindow: SnapWindowInfo?
     private var isDragging = false
     private var preservesVisualsAfterSelection = false
+    private let frozenFrame: NSImage?
     private let dimLayer = CAShapeLayer()
     private let borderLayer = CAShapeLayer()
     private let snapLayer = CAShapeLayer()
@@ -193,7 +241,8 @@ private final class RegionOverlayView: NSView {
     override var needsPanelToBecomeKey: Bool { false }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    override init(frame frameRect: NSRect) {
+    init(frame frameRect: NSRect, frozenFrame: CGImage?) {
+        self.frozenFrame = frozenFrame.map { NSImage(cgImage: $0, size: frameRect.size) }
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
@@ -229,6 +278,18 @@ private final class RegionOverlayView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        frozenFrame?.draw(
+            in: bounds,
+            from: .zero,
+            operation: .copy,
+            fraction: 1,
+            respectFlipped: true,
+            hints: [.interpolation: NSImageInterpolation.high]
+        )
     }
 
     override func viewDidMoveToWindow() {
@@ -315,7 +376,7 @@ private final class RegionOverlayView: NSView {
         // 单击吸附窗口
         if snapEnabled, !isDragging, let hover = hoverWindow {
             preservesVisualsAfterSelection = true
-            onSelection?(hover.frame, hover.id)
+            onSelection?(hover.frame, hover.captureWindowID)
             return
         }
 
