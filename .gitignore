@@ -1,5 +1,6 @@
 .build/
 dist/
+build/
 .swiftpm/
 DerivedData/
 *.xcuserstate
