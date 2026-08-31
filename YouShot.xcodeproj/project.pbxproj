@@ -27,7 +27,6 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		08BC21285CD1649F7869E198 /* AGENTS.md */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = net.daringfireball.markdown; path = AGENTS.md; sourceTree = "<group>"; };
 		0F0C18AF88FA5C7D5562D681 /* MenuBarIcon.svg */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xml; path = MenuBarIcon.svg; sourceTree = "<group>"; };
 		0F0FB5BB4B416253D08D8BD9 /* ImageMosaic.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ImageMosaic.swift; sourceTree = "<group>"; };
 		1D6F67AD89687543646C4A72 /* HotKeyManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HotKeyManager.swift; sourceTree = "<group>"; };
@@ -126,7 +125,6 @@
 				2C19EC656F6D586E884BE948 /* Resources */,
 				5E3385CEDEC48309B9E7F709 /* youshot.icon */,
 				AA17C528780748EC5BA4ACD2 /* Package.swift */,
-				08BC21285CD1649F7869E198 /* AGENTS.md */,
 			);
 			sourceTree = "<group>";
 		};

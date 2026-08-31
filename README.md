@@ -45,8 +45,7 @@ open YouShot.xcodeproj
 ### 命令行
 
 ```bash
-./scripts/build.sh
-open dist/YouShot.app
+swift build -c release
 ```
 
 也可以仅验证 Swift Package 构建：
@@ -56,7 +55,7 @@ swift build
 swift build -c release
 ```
 
-自分发版本更新的密钥、Appcast 与发布流程见 [自分发更新文档](docs/SELF_HOSTED_UPDATES.md)。
+版本发布与更新托管不包含在本开源仓库中。
 
 ## 使用方法
 
