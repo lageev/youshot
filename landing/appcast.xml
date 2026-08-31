@@ -9,5 +9,17 @@
     <link>https://youshot.yayalu.top/updates/appcast.xml</link>
     <description>YouShot 更新源</description>
     <language>zh-CN</language>
+<item>
+  <title>1.0.0</title>
+  <pubDate>Tue, 01 Sep 2026 00:06:18 +0800</pubDate>
+  <sparkle:version>1</sparkle:version>
+  <sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>
+  <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+  <enclosure
+    url="https://github.com/lageev/youshot/releases/download/v1.0.0/YouShot-1.0.0.zip"
+    sparkle:edSignature="drclOIz4pI91lbwVb/wTjSkuOKP4wJvaIm1c8Ar2OegA1xEMcVpbE8JgRqGdRpRaZzX+iDA+kz8EaVIqdDABAw=="
+    length="3767130"
+    type="application/octet-stream"/>
+</item>
   </channel>
 </rss>
