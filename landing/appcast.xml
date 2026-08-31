@@ -11,14 +11,14 @@
     <language>zh-CN</language>
 <item>
   <title>1.0.0</title>
-  <pubDate>Tue, 01 Sep 2026 00:06:18 +0800</pubDate>
+  <pubDate>Tue, 01 Sep 2026 00:09:31 +0800</pubDate>
   <sparkle:version>1</sparkle:version>
   <sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>
   <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
   <enclosure
     url="https://github.com/lageev/youshot/releases/download/v1.0.0/YouShot-1.0.0.zip"
-    sparkle:edSignature="drclOIz4pI91lbwVb/wTjSkuOKP4wJvaIm1c8Ar2OegA1xEMcVpbE8JgRqGdRpRaZzX+iDA+kz8EaVIqdDABAw=="
-    length="3767130"
+    sparkle:edSignature="gQLkP7M/tZ9MJES+UGSNFoDo34JSzLCCaRFZr2tkzgYAEI3Zq+tkLN66sXZMtKQxGjZgO1rjpw2wNbLr4MJcCg=="
+    length="3767126"
     type="application/octet-stream"/>
 </item>
   </channel>
