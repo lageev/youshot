@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  YouShot Sparkle appcast template. The shared macOS release tool updates this
+  file and mirrors it to the landing repository's public/updates directory.
+-->
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>YouShot</title>
+    <link>https://youshot.yayalu.top/updates/appcast.xml</link>
+    <description>YouShot 更新源</description>
+    <language>zh-CN</language>
+  </channel>
+</rss>

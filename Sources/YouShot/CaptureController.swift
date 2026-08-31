@@ -994,7 +994,7 @@ final class CaptureController: ObservableObject {
         // 排除 YouShot 自己的截图遮罩/HUD/标注层，但把当前可见的正常设置窗口加回。
         // 这样既不会把操作层截进去，也能对 YouShot 设置页做整屏、区域或窗口截图。
         let ownBundleIDs = Set(
-            [Bundle.main.bundleIdentifier, "top.yayalu.youshot", "com.youshot.app"]
+            [Bundle.main.bundleIdentifier, "top.yayalu.youshot"]
                 .compactMap { $0 }
         )
         let selfApps = content.applications.filter { ownBundleIDs.contains($0.bundleIdentifier) }

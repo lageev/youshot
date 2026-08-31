@@ -9,6 +9,7 @@ struct YouShotApp: App {
         MenuBarExtra {
             MenuBarView()
                 .environmentObject(appModel.controller)
+                .environmentObject(appModel.updater)
         } label: {
             Image(nsImage: MenuBarIcon.image)
                 .accessibilityLabel("YouShot")
@@ -34,9 +35,13 @@ final class SettingsPresenter {
     static let shared = SettingsPresenter()
     private var window: NSWindow?
 
-    func show(controller: CaptureController) {
+    func show(controller: CaptureController, updater: UpdateController) {
         if window == nil {
-            let hosting = NSHostingController(rootView: ContentView().environmentObject(controller))
+            let hosting = NSHostingController(
+                rootView: ContentView()
+                    .environmentObject(controller)
+                    .environmentObject(updater)
+            )
             let created = NSWindow(contentViewController: hosting)
             created.title = "YouShot 设置"
             created.styleMask = [.titled, .closable, .resizable, .fullSizeContentView]
@@ -62,6 +67,7 @@ final class SettingsPresenter {
 @MainActor
 final class AppModel: ObservableObject {
     let controller = CaptureController()
+    let updater = UpdateController()
     private var hotKeys: HotKeyManager?
 
     init() {
@@ -86,6 +92,7 @@ final class AppModel: ObservableObject {
 
 struct MenuBarView: View {
     @EnvironmentObject private var controller: CaptureController
+    @EnvironmentObject private var updater: UpdateController
 
     var body: some View {
         Button("截取当前屏幕（\(controller.shortcut(for: .currentDisplay))）") {
@@ -135,8 +142,13 @@ struct MenuBarView: View {
         Divider()
 
         Button("设置…") {
-            SettingsPresenter.shared.show(controller: controller)
+            SettingsPresenter.shared.show(controller: controller, updater: updater)
         }
+
+        Button("检查更新…") {
+            updater.checkForUpdates()
+        }
+        .disabled(!updater.canCheckForUpdates)
 
         if let url = controller.lastFileURL {
             Button("显示最近截图") {

@@ -18,6 +18,7 @@ YouShot 是一款原生 macOS 菜单栏截图工具，支持当前屏幕、全�
 - 透明 PNG、圆角、阴影、剪贴板写入
 - 0–60 秒延迟截图
 - 可自定义全局快捷键
+- 基于 Sparkle 的自分发版本检查、签名验证与自动更新
 
 ## 系统要求
 
@@ -54,6 +55,8 @@ open dist/YouShot.app
 swift build
 swift build -c release
 ```
+
+自分发版本更新的密钥、Appcast 与发布流程见 [自分发更新文档](docs/SELF_HOSTED_UPDATES.md)。
 
 ## 使用方法
 

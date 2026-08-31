@@ -36,6 +36,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
 
 struct ContentView: View {
     @EnvironmentObject private var controller: CaptureController
+    @EnvironmentObject private var updater: UpdateController
 
     private let contentBG = Color(nsColor: .windowBackgroundColor)
     private let groupBG = Color.primary.opacity(0.045)
@@ -432,6 +433,65 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 28)
+            }
+        }
+
+        section("软件更新") {
+            settingsGroup {
+                settingsRow("自动检查更新") {
+                    Toggle(
+                        "",
+                        isOn: Binding(
+                            get: { updater.automaticallyChecksForUpdates },
+                            set: { enabled in
+                                updater.setAutomaticallyChecksForUpdates(enabled)
+                            }
+                        )
+                    )
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .disabled(updater.configurationIssue != nil)
+                }
+                rowDivider
+                settingsRow("自动下载更新") {
+                    Toggle(
+                        "",
+                        isOn: Binding(
+                            get: { updater.automaticallyDownloadsUpdates },
+                            set: { enabled in
+                                updater.setAutomaticallyDownloadsUpdates(enabled)
+                            }
+                        )
+                    )
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .disabled(
+                        updater.configurationIssue != nil
+                            || !updater.automaticallyChecksForUpdates
+                    )
+                }
+                rowDivider
+                HStack {
+                    if let issue = updater.configurationIssue {
+                        Label(issue, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        Text("通过已签名的自分发更新源获取新版本。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 12)
+                    Button("检查更新…") {
+                        updater.checkForUpdates()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(!updater.canCheckForUpdates)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 13)
             }
         }
     }

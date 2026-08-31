@@ -29,6 +29,19 @@ source_references = Dir.glob(File.join(root, "Sources/YouShot/*.swift")).sort.ma
 end
 target.add_file_references(source_references)
 
+sparkle_package = project.new(Xcodeproj::Project::Object::XCRemoteSwiftPackageReference)
+sparkle_package.repositoryURL = "https://github.com/sparkle-project/Sparkle.git"
+sparkle_package.requirement = { "kind" => "exactVersion", "version" => "2.9.6" }
+project.root_object.package_references << sparkle_package
+
+sparkle_product = project.new(Xcodeproj::Project::Object::XCSwiftPackageProductDependency)
+sparkle_product.package = sparkle_package
+sparkle_product.product_name = "Sparkle"
+target.package_product_dependencies << sparkle_product
+sparkle_build_file = project.new(Xcodeproj::Project::Object::PBXBuildFile)
+sparkle_build_file.product_ref = sparkle_product
+target.frameworks_build_phase.files << sparkle_build_file
+
 resources_group = project.main_group.new_group("Resources", "Resources")
 info_plist = resources_group.new_file("Info.plist")
 menu_bar_icon = resources_group.new_file("MenuBarIcon.png")
@@ -61,9 +74,11 @@ target.build_configurations.each do |configuration|
   settings["INFOPLIST_FILE"] = info_plist.real_path.relative_path_from(project.path.dirname).to_s
   settings["LD_RUNPATH_SEARCH_PATHS"] = "$(inherited) @executable_path/../Frameworks"
   settings["MARKETING_VERSION"] = "1.0.0"
-  settings["PRODUCT_BUNDLE_IDENTIFIER"] = "com.youshot.app"
+  settings["PRODUCT_BUNDLE_IDENTIFIER"] = "top.yayalu.youshot"
   settings["PRODUCT_NAME"] = "$(TARGET_NAME)"
   settings["SWIFT_EMIT_LOC_STRINGS"] = "YES"
+  settings["YOUSHOT_UPDATE_FEED_URL"] = "https://youshot.yayalu.top/updates/appcast.xml"
+  settings["YOUSHOT_UPDATE_PUBLIC_ED_KEY"] = "DtydhIQRBSDkhL52gYd72UOMjiK/5TkFVYQYZcaM5Sw="
 end
 
 project.save
