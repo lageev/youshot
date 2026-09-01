@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>YouShot dual-layer viewfinder foreground</title>
+  <desc>Two balanced, concentric rounded viewfinder outlines.</desc>
+  <defs>
+    <path id="outer-viewfinder" d="
+      M 304 160 H 238 Q 160 160 160 238 V 304
+      M 720 160 H 786 Q 864 160 864 238 V 304
+      M 864 720 V 786 Q 864 864 786 864 H 720
+      M 304 864 H 238 Q 160 864 160 786 V 720"/>
+    <path id="inner-viewfinder" d="
+      M 416 320 H 380 Q 320 320 320 380 V 416
+      M 608 320 H 644 Q 704 320 704 380 V 416
+      M 704 608 V 644 Q 704 704 644 704 H 608
+      M 416 704 H 380 Q 320 704 320 644 V 608"/>
+  </defs>
+
+  <g fill="none" stroke="#FFFFFF" stroke-linecap="round" stroke-linejoin="round">
+    <use href="#outer-viewfinder" stroke-width="56"/>
+    <use href="#inner-viewfinder" stroke-width="44"/>
+  </g>
+</svg>

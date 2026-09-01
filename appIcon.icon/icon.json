@@ -9,12 +9,8 @@
     {
       "layers" : [
         {
-          "blend-mode" : "normal",
-          "fill" : {
-            "solid" : "srgb:0.98796,1.00000,0.94548,0.85292"
-          },
-          "image-name" : "AppIcon-Foreground.svg",
-          "name" : "AppIcon-Foreground"
+          "image-name" : "AppIcon-Foreground 2.svg",
+          "name" : "AppIcon-Foreground 2"
         }
       ],
       "shadow" : {
