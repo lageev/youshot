@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>YouShot</title>
+    <link>https://youshot.yayalu.top/updates/appcast.xml</link>
+    <description>YouShot updates</description>
+    <language>zh-CN</language>
+<item>
+  <title>1.0.1</title>
+  <pubDate>Tue, 01 Sep 2026 10:15:12 +0800</pubDate>
+  <sparkle:version>2</sparkle:version>
+  <sparkle:shortVersionString>1.0.1</sparkle:shortVersionString>
+  <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+  <enclosure
+    url="https://github.com/lageev/youshot/releases/download/v1.0.1/YouShot-1.0.1.zip"
+    sparkle:edSignature="eySTY3Fuy0FdcTBajbpNz7q2fS3Vml3Y3MrNhBDJexH4wK/D+HzMuccTO73eEIpz4a5OHd3PKVjaQCVlueMHAg=="
+    length="3622642"
+    type="application/octet-stream"/>
+</item>
+  </channel>
+</rss>
