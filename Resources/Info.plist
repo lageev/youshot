@@ -7,7 +7,7 @@
 	<key>CFBundleExecutable</key>
 	<string>YouShot</string>
 	<key>CFBundleIconName</key>
-	<string>youshot</string>
+	<string>appIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
