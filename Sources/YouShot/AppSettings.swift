@@ -23,6 +23,8 @@ enum AppSettings {
     private static let watermarkCustomHexKey = "settings.watermarkCustomHex"
     private static let watermarkSizeKey = "settings.watermarkFontSize"
     private static let watermarkOpacityKey = "settings.watermarkOpacity"
+    private static let scrollStepRatioKey = "settings.scrollStepRatio"
+    private static let scrollMaxHeightKey = "settings.scrollMaxHeight"
 
     static var blurSigma: Double {
         get {
@@ -178,5 +180,23 @@ enum AppSettings {
             return value ?? 0.3
         }
         set { UserDefaults.standard.set(newValue, forKey: watermarkOpacityKey) }
+    }
+
+    /// 每次自动滚动占选区高度的比例。保留足够重叠区域供 Vision 配准。
+    static var scrollStepRatio: Double {
+        get {
+            let value = UserDefaults.standard.object(forKey: scrollStepRatioKey) as? Double
+            return value ?? 0.62
+        }
+        set { UserDefaults.standard.set(min(max(newValue, 0.3), 0.8), forKey: scrollStepRatioKey) }
+    }
+
+    /// 长截图像素高度上限，防止极长页面耗尽内存。
+    static var scrollMaxHeight: Int {
+        get {
+            let value = UserDefaults.standard.object(forKey: scrollMaxHeightKey) as? Int
+            return value ?? 30_000
+        }
+        set { UserDefaults.standard.set(min(max(newValue, 12_000), 60_000), forKey: scrollMaxHeightKey) }
     }
 }

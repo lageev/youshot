@@ -78,7 +78,8 @@ final class AppModel: ObservableObject {
             manager.reload(
                 current: controller.hotKeyCurrent,
                 region: controller.hotKeyRegion,
-                all: controller.hotKeyAll
+                all: controller.hotKeyAll,
+                scroll: controller.hotKeyScroll
             )
         }
         controller.onEscapeCancelEnabled = { [weak manager] enabled in
@@ -102,6 +103,11 @@ struct MenuBarView: View {
 
         Button("区域选取（\(controller.shortcut(for: .region))）") {
             controller.startCapture(mode: .region)
+        }
+        .disabled(controller.isBusy)
+
+        Button("滚动长截图（\(controller.shortcut(for: .scroll))）") {
+            controller.startCapture(mode: .scroll)
         }
         .disabled(controller.isBusy)
 

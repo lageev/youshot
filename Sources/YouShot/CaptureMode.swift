@@ -4,6 +4,7 @@ enum CaptureMode: String, CaseIterable, Identifiable {
     case currentDisplay
     case allDisplays
     case region
+    case scroll
 
     var id: String { rawValue }
 
@@ -12,6 +13,7 @@ enum CaptureMode: String, CaseIterable, Identifiable {
         case .currentDisplay: return "当前屏幕"
         case .allDisplays: return "所有屏幕"
         case .region: return "区域选取"
+        case .scroll: return "滚动长截图"
         }
     }
 }

@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import Combine
 import CoreGraphics
 import CoreMedia
@@ -90,6 +91,14 @@ final class CaptureController: ObservableObject {
     @Published var hotKeyCurrent: KeyChord = HotKeyDefaults.loadCurrent()
     @Published var hotKeyRegion: KeyChord = HotKeyDefaults.loadRegion()
     @Published var hotKeyAll: KeyChord = HotKeyDefaults.loadAll()
+    @Published var hotKeyScroll: KeyChord = HotKeyDefaults.loadScroll()
+
+    @Published var scrollStepRatio: Double = AppSettings.scrollStepRatio {
+        didSet { AppSettings.scrollStepRatio = scrollStepRatio }
+    }
+    @Published var scrollMaxHeight: Int = AppSettings.scrollMaxHeight {
+        didSet { AppSettings.scrollMaxHeight = scrollMaxHeight }
+    }
 
     @Published var editorImage: NSImage?
     @Published var editorURL: URL?
@@ -163,9 +172,19 @@ final class CaptureController: ObservableObject {
         CGPreflightScreenCaptureAccess()
     }
 
+    var hasAccessibilityPermission: Bool { AXIsProcessTrusted() }
+
+    func openAccessibilitySettings() {
+        guard let url = URL(
+            string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+        ) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
     var hasEditor: Bool { editorImage != nil }
 
     private var captureTask: Task<Void, Never>?
+    private var scrollControl: ScrollCaptureControl?
     private let hud = CountdownHUD()
     private let regionSelector = RegionSelector()
     private var editorUndoStack: [EditorSnapshot] = []
@@ -175,6 +194,7 @@ final class CaptureController: ObservableObject {
         case .currentDisplay: return hotKeyCurrent.displayString
         case .region: return hotKeyRegion.displayString
         case .allDisplays: return hotKeyAll.displayString
+        case .scroll: return hotKeyScroll.displayString
         }
     }
 
@@ -189,6 +209,9 @@ final class CaptureController: ObservableObject {
         case .allDisplays:
             hotKeyAll = chord
             HotKeyDefaults.saveAll(chord)
+        case .scroll:
+            hotKeyScroll = chord
+            HotKeyDefaults.saveScroll(chord)
         }
         onHotKeysChanged?()
         statusMessage = "已更新快捷键：\(mode.title) \(chord.displayString)"
@@ -265,6 +288,9 @@ final class CaptureController: ObservableObject {
     func cancel() {
         captureTask?.cancel()
         captureTask = nil
+        scrollControl?.cancel()
+        scrollControl = nil
+        ScrollCaptureOverlay.shared.dismiss()
         regionSelector.cancel()
         hud.close()
         finishIdle(message: "已取消")
@@ -702,11 +728,19 @@ final class CaptureController: ObservableObject {
                 let context = try await makeRegionCaptureContext()
                 guard let selection = await regionSelector.pick(
                     snapWindows: windowSnapEnabled,
-                    frozenFrames: context.frames
+                    frozenFrames: context.frames,
+                    allowsScrollCapture: true
                 ) else {
                     throw CancellationError()
                 }
                 try Task.checkCancellation()
+                switch selection.action {
+                case .scrollManual, .scrollAutomatic:
+                    try await runScrollCapture(selection: selection, action: selection.action)
+                    return
+                case .standard:
+                    break
+                }
                 let delayScreen = screen(for: selection.displayID) ?? screenUnderMouse()
                 try await runDelay(on: delayScreen)
                 let captured = try await captureRegionOnFrozenScreen(
@@ -726,6 +760,9 @@ final class CaptureController: ObservableObject {
                 // 标注层已覆盖在冻结画面上后再撤掉选区层，避免松开鼠标时闪回原画面。
                 // 标注层已经接管指针语义，不要用箭头覆盖它刚设置的工具/缩放指针。
                 regionSelector.dismiss(restoreCursor: false)
+                return
+            case .scroll:
+                try await runScrollCapture()
                 return
             }
 
@@ -752,6 +789,323 @@ final class CaptureController: ObservableObject {
             regionSelector.dismiss()
             hasError = true
             finishIdle(message: error.localizedDescription)
+        }
+    }
+
+    /// 选择滚动内容区域后自动滚动、配准并实时拼接。长截图不进入原位标注层，
+    /// 因为它的画布远高于屏幕；完成后改用可滚动的独立预览窗口裁剪和导出。
+    private func runScrollCapture() async throws {
+        guard AXIsProcessTrusted() else {
+            let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
+            _ = AXIsProcessTrustedWithOptions(options)
+            throw ScrollCaptureError.accessibilityPermissionDenied
+        }
+        let context = try await makeRegionCaptureContext()
+        guard let selection = await regionSelector.pick(
+            snapWindows: false,
+            frozenFrames: context.frames
+        ) else {
+            throw CancellationError()
+        }
+        try Task.checkCancellation()
+        try await runScrollCapture(selection: selection, action: .scrollAutomatic)
+    }
+
+    private func runScrollCapture(
+        selection: RegionSelection,
+        action: RegionCaptureAction
+    ) async throws {
+        if action == .scrollAutomatic, !AXIsProcessTrusted() {
+            let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
+            _ = AXIsProcessTrustedWithOptions(options)
+            throw ScrollCaptureError.accessibilityPermissionDenied
+        }
+
+        let nsScreen = screen(for: selection.displayID) ?? screenUnderMouse()
+        let captureRect = globalFrame(for: selection)
+        regionSelector.dismiss()
+        try await Task.sleep(for: .milliseconds(220))
+
+        let content = try await shareableContent()
+        guard let display = content.displays.first(where: { $0.displayID == selection.displayID })
+                ?? content.displays.first
+        else { throw CaptureError.noDisplay }
+
+        let control = ScrollCaptureControl()
+        scrollControl = control
+        ScrollCaptureOverlay.shared.present(
+            captureRect: captureRect,
+            screen: nsScreen,
+            control: control,
+            action: action
+        )
+        var manualMonitor: Any?
+        let manualTracker = ManualScrollTracker()
+        if action == .scrollManual {
+            manualMonitor = NSEvent.addGlobalMonitorForEvents(matching: .scrollWheel) { _ in
+                if captureRect.contains(NSEvent.mouseLocation), control.state == .running {
+                    manualTracker.noteScroll()
+                }
+            }
+        }
+        defer {
+            if let manualMonitor { NSEvent.removeMonitor(manualMonitor) }
+            ScrollCaptureOverlay.shared.dismiss()
+            scrollControl = nil
+        }
+
+        guard let firstFrame = try await captureSettledScrollFrame(
+            display: display,
+            content: content,
+            sourceRect: selection.displayLocalRect
+        ) else {
+            throw ScrollCaptureError.initialFrameFailed
+        }
+
+        let effectiveMaxHeight = max(scrollMaxHeight, firstFrame.height)
+        let stitcher = ScrollCaptureStitcher(firstFrame: firstFrame, maxHeight: effectiveMaxHeight)
+        ScrollCaptureOverlay.shared.update(
+            frameCount: stitcher.frameCount,
+            pixelHeight: stitcher.pixelHeight,
+            maxHeight: effectiveMaxHeight,
+            preview: stitcher.makePreview()
+        )
+
+        let stepPoints = max(80, selection.displayLocalRect.height * CGFloat(scrollStepRatio))
+        let pixelScale = CGFloat(firstFrame.height) / max(selection.displayLocalRect.height, 1)
+        let expectedShiftPixels = stepPoints * pixelScale
+        var stalledSteps = 0
+        if action == .scrollManual {
+            var lastCapturedGeneration = 0
+            var lastSettledGeneration = 0
+            var lastCaptureTime: TimeInterval = 0
+
+            manualCaptureLoop: while true {
+                try Task.checkCancellation()
+                switch control.state {
+                case .cancelled:
+                    throw CancellationError()
+                case .finishing:
+                    break manualCaptureLoop
+                case .paused:
+                    ScrollCaptureOverlay.shared.updatePaused(true)
+                    try await Task.sleep(for: .milliseconds(60))
+                    continue
+                case .running:
+                    ScrollCaptureOverlay.shared.updatePaused(false)
+                }
+
+                let snapshot = manualTracker.snapshot()
+                let now = ProcessInfo.processInfo.systemUptime
+                let needsLiveFrame = snapshot.generation > lastCapturedGeneration
+                    && now - lastCaptureTime >= 0.15
+                let needsSettledFrame = snapshot.generation > 0
+                    && snapshot.generation != lastSettledGeneration
+                    && now - snapshot.lastEventTime >= 0.22
+                guard needsLiveFrame || needsSettledFrame else {
+                    try await Task.sleep(for: .milliseconds(35))
+                    continue
+                }
+
+                let frame: CGImage?
+                if needsSettledFrame {
+                    frame = try await captureSettledScrollFrame(
+                        display: display,
+                        content: content,
+                        sourceRect: selection.displayLocalRect
+                    )
+                    lastSettledGeneration = snapshot.generation
+                } else {
+                    frame = try await captureImage(
+                        display: display,
+                        content: content,
+                        sourceRect: selection.displayLocalRect,
+                        showsCursor: false
+                    )
+                }
+                lastCaptureTime = ProcessInfo.processInfo.systemUptime
+                lastCapturedGeneration = snapshot.generation
+                guard let frame else { continue }
+
+                switch stitcher.append(frame, expectedShiftPixels: 0) {
+                case .appended:
+                    stalledSteps = 0
+                    ScrollCaptureOverlay.shared.update(
+                        frameCount: stitcher.frameCount,
+                        pixelHeight: stitcher.pixelHeight,
+                        maxHeight: effectiveMaxHeight,
+                        preview: stitcher.makePreview()
+                    )
+                case .stalled:
+                    // 滚动中的临时帧失败很常见，只在手势停止后的稳定帧计数。
+                    if needsSettledFrame { stalledSteps += 1 }
+                    if stalledSteps >= 4 { break manualCaptureLoop }
+                case .heightLimitReached:
+                    ScrollCaptureOverlay.shared.update(
+                        frameCount: stitcher.frameCount,
+                        pixelHeight: stitcher.pixelHeight,
+                        maxHeight: effectiveMaxHeight,
+                        preview: stitcher.makePreview()
+                    )
+                    break manualCaptureLoop
+                }
+            }
+        } else {
+            var shouldScroll = true
+
+            automaticCaptureLoop: while true {
+                try Task.checkCancellation()
+                switch control.state {
+                case .cancelled:
+                    throw CancellationError()
+                case .finishing:
+                    break automaticCaptureLoop
+                case .paused:
+                    ScrollCaptureOverlay.shared.updatePaused(true)
+                    try await Task.sleep(for: .milliseconds(80))
+                    continue
+                case .running:
+                    ScrollCaptureOverlay.shared.updatePaused(false)
+                }
+
+                if shouldScroll {
+                    postScrollStep(selection: selection, deltaPoints: stepPoints)
+                    try await Task.sleep(for: .milliseconds(150))
+                }
+                guard let frame = try await captureSettledScrollFrame(
+                    display: display,
+                    content: content,
+                    sourceRect: selection.displayLocalRect
+                ) else {
+                    stalledSteps += 1
+                    shouldScroll = false
+                    if stalledSteps >= 4 { break }
+                    continue
+                }
+
+                switch stitcher.append(frame, expectedShiftPixels: expectedShiftPixels) {
+                case .appended:
+                    stalledSteps = 0
+                    shouldScroll = true
+                    ScrollCaptureOverlay.shared.update(
+                        frameCount: stitcher.frameCount,
+                        pixelHeight: stitcher.pixelHeight,
+                        maxHeight: effectiveMaxHeight,
+                        preview: stitcher.makePreview()
+                    )
+                case .stalled:
+                    stalledSteps += 1
+                    // 先在当前位置重新采样，不继续滚动。这样一次动画误配不会让
+                    // 两次滚动累积到超过视口、彻底失去可重叠内容。
+                    shouldScroll = false
+                    if stalledSteps >= 4 { break automaticCaptureLoop }
+                case .heightLimitReached:
+                    ScrollCaptureOverlay.shared.update(
+                        frameCount: stitcher.frameCount,
+                        pixelHeight: stitcher.pixelHeight,
+                        maxHeight: effectiveMaxHeight,
+                        preview: stitcher.makePreview()
+                    )
+                    break automaticCaptureLoop
+                }
+            }
+        }
+
+        guard control.state != .cancelled else { throw CancellationError() }
+        guard let stitched = stitcher.makeImage() else { throw ScrollCaptureError.stitchFailed }
+        let image = NSImage(
+            cgImage: stitched,
+            size: NSSize(
+                width: CGFloat(stitched.width) / pixelScale,
+                height: CGFloat(stitched.height) / pixelScale
+            )
+        )
+
+        copyScrollResult(image)
+        finishIdle(
+            message: stitcher.frameCount == 1
+                ? "未检测到滚动，已复制当前选区，可在预览中检查"
+                : "长截图已拼接并复制，可在预览中裁剪或保存"
+        )
+        ScrollCaptureResultPresenter.shared.present(
+            image: image,
+            onCopy: { [weak self] in self?.copyScrollResult($0) },
+            onSave: { [weak self] in self?.saveScrollResult($0) }
+        )
+    }
+
+    /// 等到页面连续两帧基本一致再返回，避免在平滑滚动动画中途做配准。
+    private func captureSettledScrollFrame(
+        display: SCDisplay,
+        content: SCShareableContent,
+        sourceRect: CGRect
+    ) async throws -> CGImage? {
+        var previous: CGImage?
+        var latest: CGImage?
+        var wait = 28
+
+        for _ in 0..<9 {
+            try Task.checkCancellation()
+            let frame = try await captureImage(
+                display: display,
+                content: content,
+                sourceRect: sourceRect,
+                showsCursor: false
+            )
+            if let previous, ScrollCaptureStitcher.imagesAreNearlyIdentical(previous, frame) {
+                return frame
+            }
+            previous = frame
+            latest = frame
+            try await Task.sleep(for: .milliseconds(wait))
+            wait = min(90, wait * 3 / 2)
+        }
+        return latest
+    }
+
+    /// CGEvent 的位置使用 Quartz 全局坐标（显示器左上原点）。把事件投到
+    /// 选区中心，嵌套滚动视图也能把滚轮交给用户实际选择的容器。
+    private func postScrollStep(selection: RegionSelection, deltaPoints: CGFloat) {
+        let displayBounds = CGDisplayBounds(selection.displayID)
+        let local = selection.displayLocalRect
+        let point = CGPoint(
+            x: displayBounds.minX + local.midX,
+            y: displayBounds.minY + local.midY
+        )
+        guard let event = CGEvent(
+            scrollWheelEvent2Source: CGEventSource(stateID: .hidSystemState),
+            units: .pixel,
+            wheelCount: 1,
+            wheel1: Int32(-deltaPoints.rounded()),
+            wheel2: 0,
+            wheel3: 0
+        ) else { return }
+        event.location = point
+        event.post(tap: .cghidEventTap)
+    }
+
+    func copyScrollResult(_ image: NSImage) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects([image])
+        lastPreview = image
+        statusMessage = "长截图已复制到剪贴板"
+        hasError = false
+    }
+
+    func saveScrollResult(_ image: NSImage) {
+        guard let cgImage = image.youshotCGImage else { return }
+        do {
+            try FileManager.default.createDirectory(at: saveDirectory, withIntermediateDirectories: true)
+            let url = saveDirectory.appendingPathComponent("YouShot-Long-\(timestamp()).png")
+            try PNGFile.write(cgImage, to: url)
+            lastFileURL = url
+            lastPreview = image
+            statusMessage = "长截图已保存到 图片/YouShot"
+            hasError = false
+        } catch {
+            statusMessage = error.localizedDescription
+            hasError = true
         }
     }
 

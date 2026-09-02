@@ -18,6 +18,10 @@ struct KeyChord: Codable, Equatable, Hashable, Sendable {
         keyCode: UInt32(kVK_ANSI_5),
         carbonModifiers: UInt32(cmdKey | shiftKey | optionKey)
     )
+    static let defaultScroll = KeyChord(
+        keyCode: UInt32(kVK_ANSI_6),
+        carbonModifiers: UInt32(cmdKey | shiftKey | optionKey)
+    )
 
     var displayString: String {
         var parts: [String] = []
@@ -124,14 +128,17 @@ enum HotKeyDefaults {
     private static let currentKey = "hotkey.current"
     private static let regionKey = "hotkey.region"
     private static let allKey = "hotkey.all"
+    private static let scrollKey = "hotkey.scroll"
 
     static func loadCurrent() -> KeyChord { load(currentKey) ?? .defaultCurrent }
     static func loadRegion() -> KeyChord { load(regionKey) ?? .defaultRegion }
     static func loadAll() -> KeyChord { load(allKey) ?? .defaultAll }
+    static func loadScroll() -> KeyChord { load(scrollKey) ?? .defaultScroll }
 
     static func saveCurrent(_ chord: KeyChord) { save(chord, key: currentKey) }
     static func saveRegion(_ chord: KeyChord) { save(chord, key: regionKey) }
     static func saveAll(_ chord: KeyChord) { save(chord, key: allKey) }
+    static func saveScroll(_ chord: KeyChord) { save(chord, key: scrollKey) }
 
     private static func load(_ key: String) -> KeyChord? {
         guard let data = UserDefaults.standard.data(forKey: key) else { return nil }

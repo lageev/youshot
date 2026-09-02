@@ -1,12 +1,40 @@
 import AppKit
 import QuartzCore
 
+enum RegionCaptureAction: Sendable {
+    case standard
+    case scrollManual
+    case scrollAutomatic
+}
+
 struct RegionSelection: Sendable {
     let displayID: CGDirectDisplayID
     /// Display-local rect in points, top-left origin (ScreenCaptureKit sourceRect).
     let displayLocalRect: CGRect
     /// 吸附到具体窗口时带上窗口号，用于按窗口采集（透明圆角）。
     let windowID: CGWindowID?
+    let action: RegionCaptureAction
+
+    init(
+        displayID: CGDirectDisplayID,
+        displayLocalRect: CGRect,
+        windowID: CGWindowID?,
+        action: RegionCaptureAction = .standard
+    ) {
+        self.displayID = displayID
+        self.displayLocalRect = displayLocalRect
+        self.windowID = windowID
+        self.action = action
+    }
+
+    func withAction(_ action: RegionCaptureAction) -> RegionSelection {
+        RegionSelection(
+            displayID: displayID,
+            displayLocalRect: displayLocalRect,
+            windowID: windowID,
+            action: action
+        )
+    }
 }
 
 struct SnapWindowInfo {
@@ -21,13 +49,17 @@ struct SnapWindowInfo {
 final class RegionSelector {
     private var panels: [NSPanel] = []
     private var continuation: CheckedContinuation<RegionSelection?, Never>?
+    private var actionPanel: RegionActionPanel?
+    private var allowsScrollCapture = false
 
     func pick(
         snapWindows: Bool,
-        frozenFrames: [CGDirectDisplayID: CGImage] = [:]
+        frozenFrames: [CGDirectDisplayID: CGImage] = [:],
+        allowsScrollCapture: Bool = false
     ) async -> RegionSelection? {
         await withCheckedContinuation { continuation in
             self.continuation = continuation
+            self.allowsScrollCapture = allowsScrollCapture
             present(snapWindows: snapWindows, frozenFrames: frozenFrames)
         }
     }
@@ -38,6 +70,8 @@ final class RegionSelector {
 
     /// 有效选区会保留到截图/标注层接管后才关闭，以避免画面短暂露出原桌面。
     func dismiss(restoreCursor: Bool = true) {
+        actionPanel?.orderOut(nil)
+        actionPanel = nil
         panels.forEach { $0.orderOut(nil) }
         panels.removeAll()
         // Selection views install a full-view crosshair cursor rect. Restore a
@@ -69,13 +103,16 @@ final class RegionSelector {
                 if let globalRect {
                     let local = Self.displayLocalRect(globalRect, on: screen)
                     if local.width >= 2, local.height >= 2 {
-                        self.finish(
-                            RegionSelection(
-                                displayID: displayID,
-                                displayLocalRect: local,
-                                windowID: windowID
-                            )
+                        let selection = RegionSelection(
+                            displayID: displayID,
+                            displayLocalRect: local,
+                            windowID: windowID
                         )
+                        if self.allowsScrollCapture {
+                            self.presentActions(for: selection, beside: globalRect, on: screen)
+                        } else {
+                            self.finish(selection)
+                        }
                         return
                     }
                 }
@@ -130,12 +167,32 @@ final class RegionSelector {
     }
 
     private func finish(_ selection: RegionSelection?) {
+        actionPanel?.orderOut(nil)
+        actionPanel = nil
         if selection == nil {
             dismiss()
         }
         let cont = continuation
         continuation = nil
         cont?.resume(returning: selection)
+    }
+
+    private func presentActions(
+        for selection: RegionSelection,
+        beside globalRect: CGRect,
+        on screen: NSScreen
+    ) {
+        actionPanel?.orderOut(nil)
+        panels.forEach { ($0.contentView as? RegionOverlayView)?.selectionLocked = true }
+        let panel = RegionActionPanel()
+        panel.onAction = { [weak self] action in
+            guard let self else { return }
+            self.finish(selection.withAction(action))
+        }
+        panel.onCancel = { [weak self] in self?.finish(nil) }
+        panel.position(relativeTo: globalRect, on: screen)
+        panel.orderFrontRegardless()
+        actionPanel = panel
     }
 
     /// Convert global Cocoa rect (bottom-left origin) to display-local top-left points.
@@ -225,6 +282,7 @@ private final class RegionOverlayView: NSView {
     var onSelection: ((CGRect?, CGWindowID?) -> Void)?
     var snapWindows: [SnapWindowInfo] = []
     var snapEnabled = false
+    var selectionLocked = false
 
     private var startPoint: CGPoint?
     private var currentRect: CGRect?
@@ -330,6 +388,7 @@ private final class RegionOverlayView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        guard !selectionLocked else { return }
         NSCursor.crosshair.set()
         // Option 临时关闭吸附
         let ignoreSnap = event.modifierFlags.contains(.option)
@@ -345,6 +404,7 @@ private final class RegionOverlayView: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        guard !selectionLocked else { return }
         NSCursor.crosshair.set()
         guard let startPoint else { return }
         let point = convert(event.locationInWindow, from: nil)
@@ -363,6 +423,7 @@ private final class RegionOverlayView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        guard !selectionLocked else { return }
         NSCursor.crosshair.set()
         defer {
             if !preservesVisualsAfterSelection {
@@ -469,6 +530,89 @@ private final class RegionSelectionPanel: NSPanel {
     /// `becomesKeyOnlyIfNeeded` + `needsPanelToBecomeKey` 控制。
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+}
+
+/// 选区确认条：普通截图直接确认；长截图下拉选择手动或自动滚动。
+private final class RegionActionPanel: NSPanel {
+    var onAction: ((RegionCaptureAction) -> Void)?
+    var onCancel: (() -> Void)?
+
+    private let standardButton = NSButton(title: "截图", target: nil, action: nil)
+    private let scrollButton = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let cancelButton = NSButton(title: "取消", target: nil, action: nil)
+
+    init() {
+        super.init(
+            contentRect: CGRect(x: 0, y: 0, width: 238, height: 46),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 2)
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = true
+        hidesOnDeactivate = false
+        sharingType = .none
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+
+        let effect = NSVisualEffectView(frame: contentView?.bounds ?? .zero)
+        effect.material = .hudWindow
+        effect.state = .active
+        effect.wantsLayer = true
+        effect.layer?.cornerRadius = 11
+        effect.layer?.masksToBounds = true
+        contentView = effect
+
+        standardButton.target = self
+        standardButton.action = #selector(chooseStandard)
+        standardButton.bezelColor = .systemGreen
+        scrollButton.addItems(withTitles: ["长截图", "手动滚动", "自动滚动"])
+        scrollButton.selectItem(at: 0)
+        scrollButton.target = self
+        scrollButton.action = #selector(chooseScroll)
+        cancelButton.target = self
+        cancelButton.action = #selector(cancel)
+
+        let stack = NSStackView(views: [standardButton, scrollButton, cancelButton])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 8
+        stack.edgeInsets = NSEdgeInsets(top: 8, left: 10, bottom: 8, right: 10)
+        stack.frame = effect.bounds
+        stack.autoresizingMask = [.width, .height]
+        effect.addSubview(stack)
+    }
+
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+
+    func position(relativeTo rect: CGRect, on screen: NSScreen) {
+        let size = frame.size
+        var x = rect.midX - size.width / 2
+        var y = rect.minY - size.height - 9
+        if y < screen.visibleFrame.minY + 6 {
+            let above = rect.maxY + 9
+            y = above + size.height <= screen.visibleFrame.maxY - 6
+                ? above
+                : max(screen.visibleFrame.minY + 8, rect.minY + 8)
+        }
+        x = max(screen.visibleFrame.minX + 6, min(x, screen.visibleFrame.maxX - size.width - 6))
+        setFrameOrigin(CGPoint(x: x, y: y))
+    }
+
+    @objc private func chooseStandard() { onAction?(.standard) }
+
+    @objc private func chooseScroll() {
+        switch scrollButton.indexOfSelectedItem {
+        case 1: onAction?(.scrollManual)
+        case 2: onAction?(.scrollAutomatic)
+        default: break
+        }
+        scrollButton.selectItem(at: 0)
+    }
+
+    @objc private func cancel() { onCancel?() }
 }
 
 private extension RegionOverlayView {

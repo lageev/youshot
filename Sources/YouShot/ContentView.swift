@@ -143,7 +143,7 @@ struct ContentView: View {
                         pillPicker(
                             selection: delayPresetBinding,
                             options: [(0, "立即"), (3, "3秒"), (5, "5秒"), (10, "10秒")],
-                            disabled: controller.isBusy
+                            disabled: controller.isBusy || controller.mode == .scroll
                         )
                         if ![0, 3, 5, 10].contains(controller.delaySeconds) {
                             Text("\(controller.delaySeconds) 秒")
@@ -152,11 +152,41 @@ struct ContentView: View {
                         }
                         Stepper("", value: $controller.delaySeconds, in: 0...60)
                             .labelsHidden()
-                            .disabled(controller.isBusy)
+                            .disabled(controller.isBusy || controller.mode == .scroll)
                     }
                 }
             }
-            footnote(controller.mode == .region ? "区域模式：先选区，再倒计时截图。" : "倒计时结束后截图。")
+            footnote(
+                controller.mode == .scroll
+                    ? "长截图：框选可滚动内容区域，YouShot 会自动滚动、智能拼接并在页面到底时停止。"
+                    : (controller.mode == .region
+                        ? "区域模式：框选后可选择普通截图、手动长截图或自动长截图。"
+                        : "倒计时结束后截图。")
+            )
+        }
+
+        if controller.mode == .scroll {
+            section("长截图") {
+                settingsGroup {
+                    settingsRow("单次滚动") {
+                        compactSlider(
+                            value: $controller.scrollStepRatio,
+                            range: 0.3...0.8,
+                            step: 0.05,
+                            percent: true
+                        )
+                    }
+                    rowDivider
+                    settingsRow("最大高度") {
+                        pillPicker(
+                            selection: $controller.scrollMaxHeight,
+                            options: [(12_000, "1.2万"), (30_000, "3万"), (60_000, "6万")],
+                            disabled: controller.isBusy
+                        )
+                    }
+                }
+                footnote("建议框住正文滚动视口，不要包含浏览器标签栏。采集时可暂停、提前完成或按 Esc 取消；粘性顶栏和滚动条会自动从匹配区域排除。")
+            }
         }
 
         section("选取行为") {
@@ -165,17 +195,21 @@ struct ContentView: View {
                     Toggle("", isOn: $controller.includeCursor)
                         .labelsHidden()
                         .toggleStyle(.switch)
-                        .disabled(controller.isBusy)
+                        .disabled(controller.isBusy || controller.mode == .scroll)
                 }
                 rowDivider
                 settingsRow("窗口吸附") {
                     Toggle("", isOn: $controller.windowSnapEnabled)
                         .labelsHidden()
                         .toggleStyle(.switch)
-                        .disabled(controller.isBusy)
+                        .disabled(controller.isBusy || controller.mode == .scroll)
                 }
             }
-            footnote("悬停高亮窗口，单击选取；拖拽自由框选。按住 ⌥ 可临时关闭吸附。")
+            footnote(
+                controller.mode == .scroll
+                    ? "长截图不会包含鼠标指针；请拖拽框选实际滚动内容。"
+                    : "悬停高亮窗口，单击选取；拖拽自由框选。按住 ⌥ 可临时关闭吸附。"
+            )
         }
 
         if let message = controller.statusMessage, controller.hasError {
@@ -189,6 +223,13 @@ struct ContentView: View {
                         if !controller.hasScreenPermission {
                             Button("打开屏幕录制设置") {
                                 controller.openScreenRecordingSettings()
+                            }
+                            .controlSize(.small)
+                        }
+                        if !controller.hasAccessibilityPermission
+                            && (controller.mode == .scroll || message.contains("辅助功能")) {
+                            Button("打开辅助功能设置") {
+                                controller.openAccessibilitySettings()
                             }
                             .controlSize(.small)
                         }

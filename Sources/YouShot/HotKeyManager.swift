@@ -13,16 +13,18 @@ final class HotKeyManager: @unchecked Sendable {
         reload(
             current: HotKeyDefaults.loadCurrent(),
             region: HotKeyDefaults.loadRegion(),
-            all: HotKeyDefaults.loadAll()
+            all: HotKeyDefaults.loadAll(),
+            scroll: HotKeyDefaults.loadScroll()
         )
     }
 
-    func reload(current: KeyChord, region: KeyChord, all: KeyChord) {
+    func reload(current: KeyChord, region: KeyChord, all: KeyChord, scroll: KeyChord) {
         let escapeOn = escapeHotKey != nil
         unregisterAll()
         register(current, id: 1)
         register(region, id: 2)
         register(all, id: 3)
+        register(scroll, id: 4)
         if escapeOn {
             setEscapeCancelEnabled(true)
         }
@@ -127,6 +129,8 @@ final class HotKeyManager: @unchecked Sendable {
             controller.startCapture(mode: .region)
         case 3:
             controller.startCapture(mode: .allDisplays)
+        case 4:
+            controller.startCapture(mode: .scroll)
         default:
             break
         }

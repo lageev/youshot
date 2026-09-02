@@ -23,6 +23,7 @@
 		D10000000000000000000001 /* UpdateController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000002 /* UpdateController.swift */; };
 		D10000000000000000000005 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = D10000000000000000000004 /* Sparkle */; };
 		E53FE3427A2CD933FA96E1DA /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BE4430939620554F39BBB361 /* Cocoa.framework */; };
+		E20000000000000000000001 /* ScrollCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000002 /* ScrollCapture.swift */; };
 		F60397456D4919AEB30B3F0A /* ImageMosaic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0FB5BB4B416253D08D8BD9 /* ImageMosaic.swift */; };
 /* End PBXBuildFile section */
 
@@ -47,6 +48,7 @@
 		B9E81108147F2DADCA2A4629 /* EditorView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EditorView.swift; sourceTree = "<group>"; };
 		BE4430939620554F39BBB361 /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.0.sdk/System/Library/Frameworks/Cocoa.framework; sourceTree = DEVELOPER_DIR; };
 		D10000000000000000000002 /* UpdateController.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UpdateController.swift; sourceTree = "<group>"; };
+		E20000000000000000000002 /* ScrollCapture.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScrollCapture.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -86,6 +88,7 @@
 				0F0FB5BB4B416253D08D8BD9 /* ImageMosaic.swift */,
 				70EB996B687D0CA04C991D0A /* KeyChord.swift */,
 				A371D06C2F7764073A72D5D2 /* RegionSelector.swift */,
+				E20000000000000000000002 /* ScrollCapture.swift */,
 				D10000000000000000000002 /* UpdateController.swift */,
 				8FCEFC6BACFDAB35F69A592D /* YouShotApp.swift */,
 			);
@@ -221,6 +224,7 @@
 				594F6F24B7DAE453D9CB6DD5 /* EditorView.swift in Sources */,
 				587793D4415D91E5A816FC42 /* HotKeyManager.swift in Sources */,
 				F60397456D4919AEB30B3F0A /* ImageMosaic.swift in Sources */,
+				E20000000000000000000001 /* ScrollCapture.swift in Sources */,
 				7339E9A522B52A3628639472 /* KeyChord.swift in Sources */,
 				8EBE6986BCDF90463E2486DA /* RegionSelector.swift in Sources */,
 				D10000000000000000000001 /* UpdateController.swift in Sources */,
