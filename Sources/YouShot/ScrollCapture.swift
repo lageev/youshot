@@ -688,6 +688,8 @@ private final class ScrollHUDPanel: NSPanel {
         stack.alignment = .centerY
         stack.spacing = 8
         stack.edgeInsets = NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
+        // NSStackView 默认不把 autoresizing 转成约束，否则工具栏会停在背景左下角。
+        stack.translatesAutoresizingMaskIntoConstraints = true
         stack.frame = effect.bounds
         stack.autoresizingMask = [.width, .height]
         info.alignment = .center
@@ -787,94 +789,211 @@ private final class ScrollPreviewPanel: NSPanel {
 @MainActor
 final class ScrollCaptureResultPresenter {
     static let shared = ScrollCaptureResultPresenter()
-    private var window: NSWindow?
+    private var window: ScrollResultWindow?
+    private weak var controller: CaptureController?
 
-    func present(
-        image: NSImage,
-        onCopy: @escaping (NSImage) -> Void,
-        onSave: @escaping (NSImage) -> Void
-    ) {
-        window?.close()
-        let view = ScrollCaptureResultView(
-            image: image,
-            onCopy: onCopy,
-            onSave: onSave,
-            onClose: { [weak self] in self?.window?.close() }
+    var isPresented: Bool { window != nil }
+
+    func present(controller: CaptureController) {
+        dismiss()
+        self.controller = controller
+        let hosting = NSHostingController(
+            rootView: ScrollCaptureResultView().environmentObject(controller)
         )
-        let hosting = NSHostingController(rootView: view)
-        let created = NSWindow(contentViewController: hosting)
+        hosting.sizingOptions = []
+        let created = ScrollResultWindow(contentViewController: hosting)
+        created.captureController = controller
         created.title = "长截图预览"
         created.styleMask = [.titled, .closable, .resizable, .fullSizeContentView]
         created.titlebarAppearsTransparent = true
         created.titleVisibility = .hidden
         created.isMovableByWindowBackground = true
         created.isReleasedWhenClosed = false
-        created.minSize = NSSize(width: 720, height: 560)
-        created.setContentSize(NSSize(width: 880, height: 700))
+        created.minSize = NSSize(width: 860, height: 560)
+        created.onUserClose = { [weak self] in
+            self?.handleUserClose()
+        }
+
+        let visible = created.screen?.visibleFrame ?? NSScreen.main?.visibleFrame
+            ?? CGRect(x: 0, y: 0, width: 1280, height: 800)
+        let scale = max(controller.editorPixelScale.width, 0.01)
+        let pixels = controller.editorImage?.youshotCGImage
+        let contentWidth = pixels.map { CGFloat($0.width) / scale } ?? 640
+        let contentHeight = pixels.map { CGFloat($0.height) / scale } ?? 480
+        let width = min(visible.width - 40, max(980, contentWidth + 340))
+        let height = min(visible.height - 40, max(680, min(contentHeight + 210, visible.height - 40)))
+        created.setContentSize(NSSize(width: width, height: height))
         created.center()
         created.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         window = created
     }
+
+    func orderFront() {
+        window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// 代码关闭时不走取消，避免把刚导出的结果还原掉。
+    func dismiss() {
+        guard let window else { return }
+        self.window = nil
+        window.closeProgrammatically()
+    }
+
+    private func handleUserClose() {
+        guard window != nil else { return }
+        window = nil
+        controller?.cancelEditor()
+    }
+}
+
+private final class ScrollResultWindow: NSWindow {
+    weak var captureController: CaptureController?
+    var onUserClose: (() -> Void)?
+    private var programmaticClose = false
+
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+
+    func closeProgrammatically() {
+        programmaticClose = true
+        onUserClose = nil
+        close()
+    }
+
+    override func close() {
+        if programmaticClose {
+            super.close()
+            return
+        }
+        programmaticClose = true
+        let callback = onUserClose
+        onUserClose = nil
+        super.close()
+        callback?()
+    }
+
+    override func cancelOperation(_ sender: Any?) {
+        guard let captureController else { return }
+        if captureController.showTextInput {
+            captureController.cancelTextInput()
+        } else {
+            captureController.cancelEditor()
+        }
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53 {
+            cancelOperation(nil)
+            return
+        }
+        super.keyDown(with: event)
+    }
 }
 
 private struct ScrollCaptureResultView: View {
-    let image: NSImage
-    let onCopy: (NSImage) -> Void
-    let onSave: (NSImage) -> Void
-    let onClose: () -> Void
-
-    @State private var topTrim: Double = 0
-    @State private var bottomTrim: Double = 0
+    @EnvironmentObject private var controller: CaptureController
 
     private var pixelSize: CGSize {
-        guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return .zero }
+        guard let image = controller.editorImage,
+              let cg = image.youshotCGImage else { return .zero }
         return CGSize(width: cg.width, height: cg.height)
     }
 
     private var maxTrim: Double { max(0, Double(pixelSize.height) * 0.45) }
     private var keptHeight: Int {
-        max(1, Int(pixelSize.height) - Int(topTrim.rounded()) - Int(bottomTrim.rounded()))
+        let height = Int(pixelSize.height)
+        guard height > 0 else { return 1 }
+        let top = max(0, min(height - 1, Int(controller.scrollTrimTop.rounded())))
+        let bottom = max(0, min(height - top - 1, Int(controller.scrollTrimBottom.rounded())))
+        return max(1, height - top - bottom)
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            preview
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                preview
+                Divider()
+                inspector.frame(width: 268)
+            }
             Divider()
-            inspector.frame(width: 268)
+            toolbarBar
         }
         .ignoresSafeArea(.container, edges: .top)
-        .frame(minWidth: 720, minHeight: 560)
+        .frame(minWidth: 860, minHeight: 560)
+        .onExitCommand {
+            if controller.showTextInput {
+                controller.cancelTextInput()
+            } else {
+                controller.cancelEditor()
+            }
+        }
+    }
+
+    private var toolbarBar: some View {
+        VStack(spacing: 8) {
+            if let toast = controller.overlayToast {
+                Text(toast)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(Color.black.opacity(0.78), in: Capsule())
+            }
+            FloatingAnnotateToolbar()
+        }
+        .padding(.top, 8)
+        .padding(.bottom, 12)
+        .frame(maxWidth: .infinity)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private var preview: some View {
         GeometryReader { proxy in
-            let width = min(image.size.width, max(160, proxy.size.width - 80))
-            let height = width * image.size.height / max(image.size.width, 1)
             ScrollView(.vertical) {
-                Image(nsImage: image)
-                    .resizable()
-                    .interpolation(.high)
-                    .frame(width: width, height: height)
-                    .overlay(alignment: .top) {
-                        cropShade(height: CGFloat(topTrim / max(Double(pixelSize.height), 1)) * height, edge: .bottom)
-                    }
-                    .overlay(alignment: .bottom) {
-                        cropShade(height: CGFloat(bottomTrim / max(Double(pixelSize.height), 1)) * height, edge: .top)
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .strokeBorder(Color.primary.opacity(0.1), lineWidth: 1)
-                    }
-                    .shadow(color: .black.opacity(0.18), radius: 16, y: 6)
-                    .padding(.horizontal, 40)
-                    .padding(.top, 56)
-                    .padding(.bottom, 40)
-                    .frame(maxWidth: .infinity)
+                if let image = controller.editorImage {
+                    annotatedImage(image, availableWidth: max(160, proxy.size.width - 56))
+                        .padding(.top, 40)
+                        .padding(.horizontal, 28)
+                        .padding(.bottom, 28)
+                        .frame(minWidth: proxy.size.width, minHeight: proxy.size.height)
+                }
             }
         }
         .background(Color(nsColor: .underPageBackgroundColor))
+    }
+
+    private func annotatedImage(_ image: NSImage, availableWidth: CGFloat) -> some View {
+        let size = canvasSize(for: image, availableWidth: availableWidth)
+        let pixels = pixelSize
+        return AnnotationCanvas(image: image, canvasSize: size, allowsSelectionResize: false)
+            .overlay(alignment: .top) {
+                cropShade(
+                    height: shadeHeight(controller.scrollTrimTop, canvas: size.height, pixels: pixels.height),
+                    edge: .bottom
+                )
+            }
+            .overlay(alignment: .bottom) {
+                cropShade(
+                    height: shadeHeight(controller.scrollTrimBottom, canvas: size.height, pixels: pixels.height),
+                    edge: .top
+                )
+            }
+    }
+
+    /// 不放大超过采集时的点尺寸；比预览区宽时缩小到窗口内，高度仍可滚动。
+    private func canvasSize(for image: NSImage, availableWidth: CGFloat) -> CGSize {
+        guard let cg = image.youshotCGImage else { return image.size }
+        let scale = max(controller.editorPixelScale.width, 0.01)
+        let point = CGSize(width: CGFloat(cg.width) / scale, height: CGFloat(cg.height) / scale)
+        let width = min(point.width, availableWidth)
+        return CGSize(width: width, height: point.height * width / max(point.width, 1))
+    }
+
+    private func shadeHeight(_ trim: Double, canvas: CGFloat, pixels: CGFloat) -> CGFloat {
+        guard pixels > 0 else { return 0 }
+        return CGFloat(trim / Double(pixels)) * canvas
     }
 
     private var inspector: some View {
@@ -892,18 +1011,18 @@ private struct ScrollCaptureResultView: View {
                     sectionTitle("裁剪")
                     Spacer()
                     Button("重置") {
-                        topTrim = 0
-                        bottomTrim = 0
+                        controller.scrollTrimTop = 0
+                        controller.scrollTrimBottom = 0
                     }
                     .buttonStyle(.plain)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.tint)
-                    .disabled(topTrim == 0 && bottomTrim == 0)
+                    .disabled(controller.scrollTrimTop == 0 && controller.scrollTrimBottom == 0)
                 }
                 card {
-                    trimControl(title: "顶部", value: $topTrim)
+                    trimControl(title: "顶部", value: $controller.scrollTrimTop)
                     cardDivider
-                    trimControl(title: "底部", value: $bottomTrim)
+                    trimControl(title: "底部", value: $controller.scrollTrimBottom)
                 }
                 Text("压暗的部分不会导出，可用来去掉首尾多余的内容。")
                     .font(.caption)
@@ -918,30 +1037,13 @@ private struct ScrollCaptureResultView: View {
                     cardDivider
                     infoRow("格式", "PNG")
                 }
+                Text("底部工具栏与普通截图相同。绿色勾复制最终图片，下载保存文件。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Spacer(minLength: 0)
-
-            VStack(spacing: 8) {
-                Button { onSave(croppedImage()) } label: {
-                    Label("保存 PNG", systemImage: "square.and.arrow.down")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut("s", modifiers: [.command])
-                HStack(spacing: 8) {
-                    Button { onCopy(croppedImage()) } label: {
-                        Label("复制", systemImage: "doc.on.doc")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .keyboardShortcut("c", modifiers: [.command])
-                    Button { onClose() } label: {
-                        Text("完成").frame(maxWidth: .infinity)
-                    }
-                    .keyboardShortcut(.cancelAction)
-                }
-            }
-            .controlSize(.large)
         }
         .padding(.horizontal, 20)
         .padding(.top, 40)
@@ -1013,14 +1115,5 @@ private struct ScrollCaptureResultView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-    }
-
-    private func croppedImage() -> NSImage {
-        guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return image }
-        let top = max(0, min(cg.height - 1, Int(topTrim.rounded())))
-        let bottom = max(0, min(cg.height - top - 1, Int(bottomTrim.rounded())))
-        let rect = CGRect(x: 0, y: top, width: cg.width, height: cg.height - top - bottom)
-        guard let cropped = cg.cropping(to: rect) else { return image }
-        return NSImage(cgImage: cropped, size: NSSize(width: cropped.width, height: cropped.height))
     }
 }

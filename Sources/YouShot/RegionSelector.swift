@@ -14,6 +14,17 @@ struct RegionSelection: Sendable {
     let windowID: CGWindowID?
 }
 
+@_silgen_name("_CGSDefaultConnection")
+private func _CGSDefaultConnection() -> Int32
+
+@_silgen_name("CGSSetConnectionProperty")
+private func CGSSetConnectionProperty(
+    _ connection: Int32,
+    _ targetConnection: Int32,
+    _ key: CFString,
+    _ value: CFTypeRef
+) -> Int32
+
 struct SnapWindowInfo {
     let id: CGWindowID
     /// 高层级菜单/浮层依赖屏幕合成后的背景，不能再按独立窗口采集。
@@ -119,6 +130,14 @@ final class RegionSelector {
             panel.invalidateCursorRects(for: overlay)
             panels.append(panel)
         }
+        // 选区层不激活应用，WindowServer 默认忽略后台应用的光标设置，
+        // 需开启该连接属性，否则要等按下鼠标后十字光标才生效。
+        _ = CGSSetConnectionProperty(
+            _CGSDefaultConnection(),
+            _CGSDefaultConnection(),
+            "SetsCursorInBackground" as CFString,
+            kCFBooleanTrue
+        )
         // A non-activating panel can become key without taking focus from the
         // app being captured. Making the panel under the pointer key gives
         // WindowServer ownership of its cursor rect, while mouse-event updates

@@ -396,13 +396,21 @@ struct ScrollCaptureSideBar: View {
 struct AnnotationCanvas: View {
     let image: NSImage
     let canvasSize: CGSize
+    /// 长截图预览没有选区手柄，边缘不再显示缩放光标
+    var allowsSelectionResize: Bool = true
 
     @EnvironmentObject private var controller: CaptureController
     @StateObject private var drag = DragState()
 
     private var tool: EditorTool { controller.editorTool }
     private var strokeColor: Color { Color(nsColor: controller.annotationColor) }
-    private var strokeWidth: CGFloat { max(1, CGFloat(controller.strokeWidth)) }
+    /// 画布相对图片点尺寸的比例。普通标注层为 1；长截图缩进预览窗口时小于 1。
+    private var canvasPointScale: CGFloat {
+        guard let cg = image.youshotCGImage, cg.width > 0, canvasSize.width > 0 else { return 1 }
+        let imagePoints = CGFloat(cg.width) / max(controller.editorPixelScale.width, 0.01)
+        return canvasSize.width / max(imagePoints, 1)
+    }
+    private var strokeWidth: CGFloat { max(0.75, CGFloat(controller.strokeWidth) * canvasPointScale) }
     private var penStrokeColor: Color { strokeColor.opacity(controller.strokeOpacity) }
     private var penStrokeWidth: CGFloat { max(1, strokeWidth * controller.penBrush.widthScale) }
 
@@ -425,7 +433,7 @@ struct AnnotationCanvas: View {
             }
             .frame(width: canvasSize.width, height: canvasSize.height)
             .contentShape(Rectangle())
-            .gesture(dragGesture(fitted: fitted))
+            .highPriorityGesture(dragGesture(fitted: fitted))
 
             inlineTextEditor(fitted: fitted)
         }
@@ -688,7 +696,8 @@ struct AnnotationCanvas: View {
            let origin = toView(pixel, fitted: fitted) {
             InlineTextField(
                 origin: origin,
-                available: max(60, canvasSize.width - origin.x - 6)
+                available: max(60, canvasSize.width - origin.x - 6),
+                pointScale: canvasPointScale
             )
         }
     }
@@ -831,7 +840,8 @@ struct AnnotationCanvas: View {
     }
 
     private func selectionResizeCursor(at point: CGPoint) -> NSCursor? {
-        OverlayCursor.resizeCursor(at: point, in: canvasSize)
+        guard allowsSelectionResize else { return nil }
+        return OverlayCursor.resizeCursor(at: point, in: canvasSize)
     }
 
     private func hitOverlay(at point: CGPoint, fitted: CGRect) -> OverlayItem? {
@@ -956,16 +966,19 @@ private struct InlineTextField: View {
 
     let origin: CGPoint
     let available: CGFloat
+    var pointScale: CGFloat = 1
 
     @EnvironmentObject private var controller: CaptureController
     @FocusState private var focused: Bool
 
+    private var fontSize: CGFloat { controller.annotationFontSize * pointScale }
+
     private var font: Font {
-        .system(size: controller.annotationFontSize, weight: .bold)
+        .system(size: fontSize, weight: .bold)
     }
 
     private var textSize: CGSize {
-        let size = controller.annotationFontSize
+        let size = fontSize
         let text = controller.textDraft.isEmpty ? Self.placeholder : controller.textDraft
         return (text as NSString).size(withAttributes: [.font: NSFont.boldSystemFont(ofSize: size)])
     }
@@ -973,12 +986,12 @@ private struct InlineTextField: View {
     private var wrap: CGRect {
         let rect = CGRect(
             origin: .zero,
-            size: CGSize(width: max(textSize.width, 8), height: max(textSize.height, controller.annotationFontSize))
+            size: CGSize(width: max(textSize.width, 8), height: max(textSize.height, fontSize))
         )
         if controller.textBackdrop == .none {
             return rect.insetBy(dx: -8, dy: -5)
         }
-        return controller.textBackdrop.wrapRect(textRect: rect, fontSize: controller.annotationFontSize)
+        return controller.textBackdrop.wrapRect(textRect: rect, fontSize: fontSize)
     }
 
     var body: some View {
@@ -1007,7 +1020,7 @@ private struct InlineTextField: View {
             RoundedRectangle(
                 cornerRadius: controller.textBackdrop == .none
                     ? 8
-                    : controller.textBackdrop.cornerRadius(for: box, fontSize: controller.annotationFontSize),
+                    : controller.textBackdrop.cornerRadius(for: box, fontSize: fontSize),
                 style: .continuous
             )
             .strokeBorder(Color(nsColor: controller.annotationColor).opacity(0.85), lineWidth: 1)
@@ -1021,7 +1034,7 @@ private struct InlineTextField: View {
     @ViewBuilder
     private func textInputBackdrop(box: CGRect) -> some View {
         let color = Color(nsColor: controller.textBackdropColor)
-        let radius = controller.textBackdrop.cornerRadius(for: box, fontSize: controller.annotationFontSize)
+        let radius = controller.textBackdrop.cornerRadius(for: box, fontSize: fontSize)
         switch controller.textBackdrop {
         case .none:
             Color.clear

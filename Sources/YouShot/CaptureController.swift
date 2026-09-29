@@ -132,6 +132,9 @@ final class CaptureController: ObservableObject {
     @Published var overlayToast: String?
     /// 标注层右侧长截图入口是否已展开自动 / 手动滚动选项
     @Published var scrollChoiceVisible = false
+    /// 长截图预览里裁掉的首尾像素，导出时才生效
+    @Published var scrollTrimTop: Double = 0
+    @Published var scrollTrimBottom: Double = 0
     var overlayResizeOrigin: CGRect?
 
     var onHotKeysChanged: (() -> Void)?
@@ -144,8 +147,14 @@ final class CaptureController: ObservableObject {
     private var editorBackdropCG: CGImage?
     private var editorHostScreenFrame: CGRect?
     private var editorSelectionFrame: CGRect?
+    /// 长截图没有整屏背景，用采集时的像素倍率换算笔宽
+    private var editorScaleOverride: CGFloat?
+    private var scrollResultEditing = false
 
     var editorPixelScale: CGSize {
+        if let editorScaleOverride, editorScaleOverride > 0 {
+            return CGSize(width: editorScaleOverride, height: editorScaleOverride)
+        }
         guard let full = editorBackdropCG, let screen = editorHostScreenFrame, screen.width > 0, screen.height > 0 else {
             return CGSize(width: 2, height: 2)
         }
@@ -281,6 +290,9 @@ final class CaptureController: ObservableObject {
 
     func startCapture(mode overrideMode: CaptureMode? = nil) {
         guard !isBusy else { return }
+        if ScrollCaptureResultPresenter.shared.isPresented {
+            closeEditor()
+        }
         if let overrideMode {
             mode = overrideMode
         }
@@ -486,28 +498,28 @@ final class CaptureController: ObservableObject {
     }
 
     func copyEditor() {
-        guard let image = editorImage, let cg = image.youshotCGImage else { return }
-        let styled = NSImage(youshotCGImage: styledExport(flattened(cg)))
+        guard let exported = editorExportCGImage() else { return }
+        let image = NSImage(youshotCGImage: exported)
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.writeObjects([styled])
-        lastPreview = styled
-        statusMessage = "已复制到剪贴板"
+        pasteboard.writeObjects([image])
+        lastPreview = image
+        statusMessage = scrollResultEditing ? "长截图已复制到剪贴板" : "已复制到剪贴板"
         hasError = false
     }
 
     func saveEditor() {
-        guard let image = editorImage, let cg = image.youshotCGImage else { return }
-        let styled = styledExport(flattened(cg))
+        guard let exported = editorExportCGImage() else { return }
         do {
             try FileManager.default.createDirectory(at: saveDirectory, withIntermediateDirectories: true)
+            let prefix = scrollResultEditing ? "YouShot-Long" : "YouShot"
             let url = editorURL
-                ?? saveDirectory.appendingPathComponent("YouShot-\(timestamp()).png")
-            try PNGFile.write(styled, to: url)
+                ?? saveDirectory.appendingPathComponent("\(prefix)-\(timestamp()).png")
+            try PNGFile.write(exported, to: url)
             editorURL = url
             lastFileURL = url
-            lastPreview = NSImage(youshotCGImage: styled)
-            statusMessage = "已保存到 图片/YouShot"
+            lastPreview = NSImage(youshotCGImage: exported)
+            statusMessage = scrollResultEditing ? "长截图已保存到 图片/YouShot" : "已保存到 图片/YouShot"
             hasError = false
             flashToast("已保存到 图片/YouShot")
         } catch {
@@ -538,6 +550,11 @@ final class CaptureController: ObservableObject {
 
     func closeEditor() {
         AnnotationOverlay.shared.dismiss()
+        ScrollCaptureResultPresenter.shared.dismiss()
+        scrollResultEditing = false
+        editorScaleOverride = nil
+        scrollTrimTop = 0
+        scrollTrimBottom = 0
         editorImage = nil
         editorURL = nil
         editorBaseImage = nil
@@ -562,6 +579,10 @@ final class CaptureController: ObservableObject {
 
     /// 从菜单重新打开当前标注层（仍在冻结的整屏背景上）
     func reopenEditorOverlay() {
+        if ScrollCaptureResultPresenter.shared.isPresented {
+            ScrollCaptureResultPresenter.shared.orderFront()
+            return
+        }
         guard let image = editorImage ?? lastPreview,
               let screenFrame = editorHostScreenFrame,
               let selectionFrame = editorSelectionFrame,
@@ -645,6 +666,29 @@ final class CaptureController: ObservableObject {
         lastPreview = NSImage(youshotCGImage: flat)
     }
 
+    private func editorExportCGImage() -> CGImage? {
+        guard let image = editorImage, let cg = image.youshotCGImage else { return nil }
+        let flat = flattened(cg)
+        if scrollResultEditing {
+            return croppedScrollImage(flat)
+        }
+        return styledExport(flat)
+    }
+
+    /// 长截图预览的首尾裁剪。坐标系与预览遮罩一致，原点在图像顶部。
+    private func croppedScrollImage(_ image: CGImage) -> CGImage {
+        let top = max(0, min(image.height - 1, Int(scrollTrimTop.rounded())))
+        let bottom = max(0, min(image.height - top - 1, Int(scrollTrimBottom.rounded())))
+        guard top > 0 || bottom > 0 else { return image }
+        let rect = CGRect(
+            x: 0,
+            y: CGFloat(top),
+            width: CGFloat(image.width),
+            height: CGFloat(image.height - top - bottom)
+        )
+        return image.cropping(to: rect) ?? image
+    }
+
     private func styledExport(_ image: CGImage, scale: CGFloat? = nil) -> CGImage {
         let pixelScale = scale ?? editorPixelScale.width
         return ImageExportStyle.apply(
@@ -701,6 +745,11 @@ final class CaptureController: ObservableObject {
         backdrop: NSImage,
         fullImage: CGImage
     ) {
+        ScrollCaptureResultPresenter.shared.dismiss()
+        scrollResultEditing = false
+        editorScaleOverride = nil
+        scrollTrimTop = 0
+        scrollTrimBottom = 0
         editorUndoStack.removeAll()
         editorRedoStack.removeAll()
         canUndoEditor = false
@@ -817,7 +866,7 @@ final class CaptureController: ObservableObject {
     }
 
     /// 从标注层右侧入口发起长截图：沿用当前选区，撤掉冻结画面后在真实页面上滚动拼接。
-    /// 长截图画布远高于屏幕，完成后改用可滚动的独立预览窗口裁剪和导出。
+    /// 长截图画布远高于屏幕，完成后用可滚动预览继续标注，工具栏与普通截图相同。
     func startScrollCapture(_ action: RegionCaptureAction) {
         guard !isBusy,
               let screenFrame = editorHostScreenFrame,
@@ -1058,14 +1107,38 @@ final class CaptureController: ObservableObject {
         copyScrollResult(image)
         finishIdle(
             message: stitcher.frameCount == 1
-                ? "未检测到滚动，已复制当前选区，可在预览中检查"
-                : "长截图已拼接并复制，可在预览中裁剪或保存"
+                ? "未检测到滚动，已复制当前选区，可在预览中继续标注"
+                : "长截图已拼接并复制，可在预览中标注、裁剪或保存"
         )
-        ScrollCaptureResultPresenter.shared.present(
-            image: image,
-            onCopy: { [weak self] in self?.copyScrollResult($0) },
-            onSave: { [weak self] in self?.saveScrollResult($0) }
-        )
+        presentScrollResult(image: image, pixelScale: pixelScale)
+    }
+
+    /// 长截图预览复用标注状态，工具栏的撤销、保存、复制和取消与普通截图相同。
+    private func presentScrollResult(image: NSImage, pixelScale: CGFloat) {
+        editorUndoStack.removeAll()
+        editorRedoStack.removeAll()
+        canUndoEditor = false
+        canRedoEditor = false
+        highlightRects.removeAll()
+        overlays.removeAll()
+        scrollTrimTop = 0
+        scrollTrimBottom = 0
+        scrollResultEditing = true
+        editorScaleOverride = pixelScale
+        editorBaseImage = image
+        editorImage = image
+        editorURL = nil
+        editorBackdrop = nil
+        editorBackdropCG = nil
+        editorHostScreenFrame = nil
+        editorSelectionFrame = nil
+        cancelTextInput()
+        editorTool = .rect
+        lastPreview = image
+        overlaySelection = .zero
+        overlayResizing = false
+        overlayResizeOrigin = nil
+        ScrollCaptureResultPresenter.shared.present(controller: self)
     }
 
     /// 等到页面连续两帧基本一致再返回，避免在平滑滚动动画中途做配准。
@@ -1125,22 +1198,6 @@ final class CaptureController: ObservableObject {
         lastPreview = image
         statusMessage = "长截图已复制到剪贴板"
         hasError = false
-    }
-
-    func saveScrollResult(_ image: NSImage) {
-        guard let cgImage = image.youshotCGImage else { return }
-        do {
-            try FileManager.default.createDirectory(at: saveDirectory, withIntermediateDirectories: true)
-            let url = saveDirectory.appendingPathComponent("YouShot-Long-\(timestamp()).png")
-            try PNGFile.write(cgImage, to: url)
-            lastFileURL = url
-            lastPreview = image
-            statusMessage = "长截图已保存到 图片/YouShot"
-            hasError = false
-        } catch {
-            statusMessage = error.localizedDescription
-            hasError = true
-        }
     }
 
     private func runDelay(on screen: NSScreen) async throws {
