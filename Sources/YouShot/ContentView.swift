@@ -143,7 +143,7 @@ struct ContentView: View {
                         pillPicker(
                             selection: delayPresetBinding,
                             options: [(0, "立即"), (3, "3秒"), (5, "5秒"), (10, "10秒")],
-                            disabled: controller.isBusy || controller.mode == .scroll
+                            disabled: controller.isBusy
                         )
                         if ![0, 3, 5, 10].contains(controller.delaySeconds) {
                             Text("\(controller.delaySeconds) 秒")
@@ -152,20 +152,20 @@ struct ContentView: View {
                         }
                         Stepper("", value: $controller.delaySeconds, in: 0...60)
                             .labelsHidden()
-                            .disabled(controller.isBusy || controller.mode == .scroll)
+                            .disabled(controller.isBusy)
                     }
                 }
             }
             footnote(
                 controller.mode == .scroll
-                    ? "长截图：框选可滚动内容区域，YouShot 会自动滚动、智能拼接并在页面到底时停止。"
+                    ? "长截图：框选可滚动内容区域后，在选区右侧选择自动或手动滚动开始拼接。"
                     : (controller.mode == .region
-                        ? "区域模式：框选后可选择普通截图、手动长截图或自动长截图。"
+                        ? "区域模式：框选后进入标注，需要长截图时点选区右侧的「长截图」，再选自动或手动滚动。"
                         : "倒计时结束后截图。")
             )
         }
 
-        if controller.mode == .scroll {
+        if controller.mode == .region || controller.mode == .scroll {
             section("长截图") {
                 settingsGroup {
                     settingsRow("单次滚动") {
@@ -185,7 +185,7 @@ struct ContentView: View {
                         )
                     }
                 }
-                footnote("建议框住正文滚动视口，不要包含浏览器标签栏。采集时可暂停、提前完成或按 Esc 取消；粘性顶栏和滚动条会自动从匹配区域排除。")
+                footnote("建议框住正文滚动视口，不要包含浏览器标签栏。采集时可暂停、提前完成或按 Esc 取消；粘性顶栏、底部悬浮条和滚动条会自动识别，不会重复拼接。")
             }
         }
 
@@ -195,21 +195,17 @@ struct ContentView: View {
                     Toggle("", isOn: $controller.includeCursor)
                         .labelsHidden()
                         .toggleStyle(.switch)
-                        .disabled(controller.isBusy || controller.mode == .scroll)
+                        .disabled(controller.isBusy)
                 }
                 rowDivider
                 settingsRow("窗口吸附") {
                     Toggle("", isOn: $controller.windowSnapEnabled)
                         .labelsHidden()
                         .toggleStyle(.switch)
-                        .disabled(controller.isBusy || controller.mode == .scroll)
+                        .disabled(controller.isBusy)
                 }
             }
-            footnote(
-                controller.mode == .scroll
-                    ? "长截图不会包含鼠标指针；请拖拽框选实际滚动内容。"
-                    : "悬停高亮窗口，单击选取；拖拽自由框选。按住 ⌥ 可临时关闭吸附。"
-            )
+            footnote("悬停高亮窗口，单击选取；拖拽自由框选。按住 ⌥ 可临时关闭吸附。鼠标指针默认不进入截图，长截图也不会包含。")
         }
 
         if let message = controller.statusMessage, controller.hasError {

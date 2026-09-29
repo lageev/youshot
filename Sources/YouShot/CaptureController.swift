@@ -10,7 +10,9 @@ import ScreenCaptureKit
 @MainActor
 final class CaptureController: ObservableObject {
     @Published var delaySeconds: Int = 0
-    @Published var includeCursor: Bool = true
+    @Published var includeCursor: Bool = AppSettings.includeCursor {
+        didSet { AppSettings.includeCursor = includeCursor }
+    }
     @Published var mode: CaptureMode = .currentDisplay
     /// 设置窗口左侧导航当前项（避免 ContentView 依赖 @State 宏）
     @Published var settingsTabRaw: String = "capture"
@@ -50,6 +52,9 @@ final class CaptureController: ObservableObject {
     }
     @Published var rectShape: RectShape = AppSettings.rectShape {
         didSet { AppSettings.rectShape = rectShape }
+    }
+    @Published var numberStyle: NumberBadgeStyle = AppSettings.numberStyle {
+        didSet { AppSettings.numberStyle = numberStyle }
     }
     @Published var textBackdrop: TextBackdrop = AppSettings.textBackdrop {
         didSet { AppSettings.textBackdrop = textBackdrop }
@@ -125,6 +130,8 @@ final class CaptureController: ObservableObject {
     /// 圆角矩形 / 椭圆 / 文字：先叠在画布上，可拖动，导出时才合入图片
     @Published var overlays: [OverlayItem] = []
     @Published var overlayToast: String?
+    /// 标注层右侧长截图入口是否已展开自动 / 手动滚动选项
+    @Published var scrollChoiceVisible = false
     var overlayResizeOrigin: CGRect?
 
     var onHotKeysChanged: (() -> Void)?
@@ -156,6 +163,14 @@ final class CaptureController: ObservableObject {
 
     /// 文字标注字号（点），跟随粗细变化
     var annotationFontSize: Double { strokeWidth * 6 }
+
+    var nextAnnotationNumber: Int {
+        let placed = overlays.compactMap { item -> Int? in
+            guard item.kind == .number else { return nil }
+            return Int(item.text)
+        }
+        return (placed.max() ?? 0) + 1
+    }
 
     private var strokePixelWidth: CGFloat {
         max(1, CGFloat(strokeWidth) * editorPixelScale.width)
@@ -312,6 +327,23 @@ final class CaptureController: ObservableObject {
         pushHistory()
         overlays.append(
             .shape(kind, frame: pixelRect, color: annotationColor, lineWidth: strokePixelWidth)
+        )
+        refreshEditorPreview()
+    }
+
+    func placeNumber(at center: CGPoint) {
+        let text = "\(nextAnnotationNumber)"
+        let fontSize = strokePixelWidth * 6
+        let frame = numberStyle.frame(center: center, text: text, fontSize: fontSize)
+        pushHistory()
+        overlays.append(
+            .number(
+                frame: frame,
+                text: text,
+                color: annotationColor,
+                fontSize: fontSize,
+                style: numberStyle
+            )
         )
         refreshEditorPreview()
     }
@@ -516,6 +548,7 @@ final class CaptureController: ObservableObject {
         overlaySelection = .zero
         overlayResizing = false
         overlayResizeOrigin = nil
+        scrollChoiceVisible = false
         highlightRects.removeAll()
         overlays.removeAll()
         cancelTextInput()
@@ -722,25 +755,17 @@ final class CaptureController: ObservableObject {
             case .allDisplays:
                 try await runDelay(on: screenUnderMouse())
                 results = try await captureAllDisplays()
-            case .region:
+            case .region, .scroll:
                 // 在任何选区面板出现前冻结所有屏幕。菜单、Popover、Spotlight、
                 // Raycast 等失焦即消失的界面仍会留在冻结帧里供选择和裁剪。
                 let context = try await makeRegionCaptureContext()
                 guard let selection = await regionSelector.pick(
                     snapWindows: windowSnapEnabled,
-                    frozenFrames: context.frames,
-                    allowsScrollCapture: true
+                    frozenFrames: context.frames
                 ) else {
                     throw CancellationError()
                 }
                 try Task.checkCancellation()
-                switch selection.action {
-                case .scrollManual, .scrollAutomatic:
-                    try await runScrollCapture(selection: selection, action: selection.action)
-                    return
-                case .standard:
-                    break
-                }
                 let delayScreen = screen(for: selection.displayID) ?? screenUnderMouse()
                 try await runDelay(on: delayScreen)
                 let captured = try await captureRegionOnFrozenScreen(
@@ -757,12 +782,11 @@ final class CaptureController: ObservableObject {
                     backdrop: captured.backdrop,
                     fullImage: captured.fullImage
                 )
+                // 长截图快捷键同样进入标注层，只是直接展开右侧的滚动方式选择。
+                scrollChoiceVisible = mode == .scroll
                 // 标注层已覆盖在冻结画面上后再撤掉选区层，避免松开鼠标时闪回原画面。
                 // 标注层已经接管指针语义，不要用箭头覆盖它刚设置的工具/缩放指针。
                 regionSelector.dismiss(restoreCursor: false)
-                return
-            case .scroll:
-                try await runScrollCapture()
                 return
             }
 
@@ -792,23 +816,33 @@ final class CaptureController: ObservableObject {
         }
     }
 
-    /// 选择滚动内容区域后自动滚动、配准并实时拼接。长截图不进入原位标注层，
-    /// 因为它的画布远高于屏幕；完成后改用可滚动的独立预览窗口裁剪和导出。
-    private func runScrollCapture() async throws {
-        guard AXIsProcessTrusted() else {
-            let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
-            _ = AXIsProcessTrustedWithOptions(options)
-            throw ScrollCaptureError.accessibilityPermissionDenied
+    /// 从标注层右侧入口发起长截图：沿用当前选区，撤掉冻结画面后在真实页面上滚动拼接。
+    /// 长截图画布远高于屏幕，完成后改用可滚动的独立预览窗口裁剪和导出。
+    func startScrollCapture(_ action: RegionCaptureAction) {
+        guard !isBusy,
+              let screenFrame = editorHostScreenFrame,
+              let screen = NSScreen.screens.first(where: { $0.frame == screenFrame })
+        else { return }
+        let selection = RegionSelection(
+            displayID: displayID(of: screen),
+            displayLocalRect: overlaySelection.integral,
+            windowID: nil
+        )
+        closeEditor()
+        hasError = false
+        statusMessage = nil
+        setBusy(true)
+        captureTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.runScrollCapture(selection: selection, action: action)
+            } catch is CancellationError {
+                self.finishIdle(message: "已取消")
+            } catch {
+                self.hasError = true
+                self.finishIdle(message: error.localizedDescription)
+            }
         }
-        let context = try await makeRegionCaptureContext()
-        guard let selection = await regionSelector.pick(
-            snapWindows: false,
-            frozenFrames: context.frames
-        ) else {
-            throw CancellationError()
-        }
-        try Task.checkCancellation()
-        try await runScrollCapture(selection: selection, action: .scrollAutomatic)
     }
 
     private func runScrollCapture(

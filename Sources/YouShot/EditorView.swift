@@ -42,7 +42,7 @@ struct FloatingAnnotateToolbar: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .background { barBackground }
+            .background { Self.barBackground }
         }
     }
 
@@ -65,6 +65,8 @@ struct FloatingAnnotateToolbar: View {
                     rectControls
                 case .text:
                     textControls
+                case .number:
+                    numberControls
                 default:
                     PaletteSwatches(index: $controller.strokeColorIndex, customHex: $controller.strokeCustomHex)
                     miniSlider("粗细", value: $controller.strokeWidth, range: 1...16, width: 80)
@@ -72,7 +74,7 @@ struct FloatingAnnotateToolbar: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
-            .background { barBackground }
+            .background { Self.barBackground }
         }
     }
 
@@ -152,6 +154,23 @@ struct FloatingAnnotateToolbar: View {
     }
 
     @ViewBuilder
+    private var numberControls: some View {
+        HStack(spacing: 12) {
+            shapePicker(
+                selection: $controller.numberStyle,
+                items: NumberBadgeStyle.allCases,
+                title: \.title,
+                symbol: \.symbolName
+            )
+            PaletteSwatches(index: $controller.strokeColorIndex, customHex: $controller.strokeCustomHex)
+            miniSlider("大小", value: $controller.strokeWidth, range: 1...16, width: 80)
+            Text("下一个 \(controller.nextAnnotationNumber)")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
     private var textControls: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
@@ -202,7 +221,7 @@ struct FloatingAnnotateToolbar: View {
         }
     }
 
-    private var barBackground: some View {
+    static var barBackground: some View {
         RoundedRectangle(cornerRadius: 18, style: .continuous)
             .fill(.thickMaterial)
             .overlay {
@@ -259,6 +278,8 @@ struct FloatingAnnotateToolbar: View {
             return "\(item.title)（样式条可切椭圆，⇧ 正方形 / 正圆；可拖动调整位置）"
         case .text:
             return "\(item.title)（可拖动调整位置）"
+        case .number:
+            return "序号（点击按 1、2、3 插入，可拖动）"
         default:
             return item.title
         }
@@ -308,6 +329,65 @@ struct FloatingAnnotateToolbar: View {
                 value.wrappedValue = min(max(snapped, range.lowerBound), range.upperBound)
             }
         )
+    }
+}
+
+/// 选区右侧的长截图入口：点开后在旁边紧接着选择自动或手动滚动，选中即开始拼接。
+struct ScrollCaptureSideBar: View {
+    /// 展开后的宽度，用于判断选区右侧是否放得下。
+    static let expandedWidth: CGFloat = 212
+
+    @EnvironmentObject private var controller: CaptureController
+
+    var body: some View {
+        HStack(spacing: 4) {
+            sideButton("长截图", symbol: "rectangle.expand.vertical", selected: controller.scrollChoiceVisible) {
+                controller.scrollChoiceVisible.toggle()
+            }
+            .help("滚动长截图")
+
+            if controller.scrollChoiceVisible {
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.35))
+                    .frame(width: 1, height: 28)
+                    .padding(.horizontal, 2)
+                sideButton("自动滚动", symbol: "arrow.down.to.line") {
+                    controller.startScrollCapture(.scrollAutomatic)
+                }
+                .help("自动滚动选区并拼接，页面到底后停止（需要辅助功能权限）")
+                sideButton("手动滚动", symbol: "computermouse") {
+                    controller.startScrollCapture(.scrollManual)
+                }
+                .help("在选区内自行缓慢滚动，实时拼接")
+            }
+        }
+        .padding(6)
+        .fixedSize()
+        .background { FloatingAnnotateToolbar.barBackground }
+    }
+
+    private func sideButton(
+        _ title: String,
+        symbol: String,
+        selected: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(spacing: 3) {
+                Image(systemName: symbol)
+                    .font(.system(size: 15, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .frame(width: 60, height: 44)
+            .foregroundStyle(selected ? Color.accentColor : Color.primary)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(selected ? Color.accentColor.opacity(0.18) : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -432,7 +512,7 @@ struct AnnotationCanvas: View {
                     .frame(width: rect.width, height: rect.height)
                     .offset(x: rect.minX, y: rect.minY)
             }
-        case .text, .highlight, .watermark:
+        case .text, .highlight, .watermark, .number:
             EmptyView()
         }
     }
@@ -469,6 +549,46 @@ struct AnnotationCanvas: View {
                let textOrigin = toView(item.frame.origin, fitted: fitted) {
                 placedText(item, wrap: wrap, textOrigin: textOrigin, fitted: fitted)
             }
+        case .number:
+            if let rect = toViewRect(item.frame, fitted: fitted) {
+                placedNumber(item, rect: rect, fitted: fitted)
+            }
+        }
+    }
+
+    private func placedNumber(_ item: OverlayItem, rect: CGRect, fitted: CGRect) -> some View {
+        let fontSize = max(8, viewLength(item.fontSize, fitted: fitted))
+        let textColor = Color(nsColor: item.numberStyle.textColor(on: item.color))
+        return ZStack {
+            numberBadge(item, rect: rect, fitted: fitted)
+            Text(item.text)
+                .font(.system(size: fontSize, weight: .bold))
+                .foregroundStyle(textColor)
+                .shadow(
+                    color: item.numberStyle == .plain ? .black.opacity(0.55) : .clear,
+                    radius: item.numberStyle == .plain ? max(1, fontSize * 0.12) : 0,
+                    y: 1
+                )
+        }
+        .frame(width: rect.width, height: rect.height)
+        .offset(x: rect.minX, y: rect.minY)
+    }
+
+    @ViewBuilder
+    private func numberBadge(_ item: OverlayItem, rect: CGRect, fitted: CGRect) -> some View {
+        let color = Color(nsColor: item.color)
+        switch item.numberStyle {
+        case .filled:
+            Circle().fill(color)
+        case .ring:
+            ZStack {
+                Circle().fill(Color.white.opacity(0.94))
+                Circle().strokeBorder(color, lineWidth: max(1.5, viewLength(NumberBadgeStyle.ringWidth(for: item.fontSize), fitted: fitted)))
+            }
+        case .square:
+            RoundedRectangle(cornerRadius: rect.width * 0.22, style: .continuous).fill(color)
+        case .plain:
+            Color.clear
         }
     }
 
@@ -579,7 +699,7 @@ struct AnnotationCanvas: View {
     }
 
     private func dragGesture(fitted: CGRect) -> some Gesture {
-        DragGesture(minimumDistance: tool == .text ? 0 : 2)
+        DragGesture(minimumDistance: tool == .text || tool == .number ? 0 : 2)
             .onChanged { value in
                 if tool == .watermark { return }
                 if drag.movingID != nil {
@@ -594,7 +714,7 @@ struct AnnotationCanvas: View {
                     NSCursor.closedHand.set()
                     return
                 }
-                if tool == .text { return }
+                if tool == .text || tool == .number { return }
                 if drag.start == nil {
                     drag.start = value.startLocation
                     drag.points = [value.startLocation]
@@ -622,6 +742,14 @@ struct AnnotationCanvas: View {
                 if tool == .text {
                     if let pixel = toPixel(value.startLocation, fitted: fitted) {
                         controller.beginTextInput(at: pixel)
+                    }
+                    drag.reset()
+                    updateCanvasCursor(at: value.startLocation)
+                    return
+                }
+                if tool == .number {
+                    if let pixel = toPixel(value.startLocation, fitted: fitted) {
+                        controller.placeNumber(at: pixel)
                     }
                     drag.reset()
                     updateCanvasCursor(at: value.startLocation)
@@ -655,7 +783,7 @@ struct AnnotationCanvas: View {
                     if let rect = pixelRect(from: start, to: end, fitted: fitted) {
                         controller.applyRedact(pixelRect: rect)
                     }
-                case .text, .watermark:
+                case .text, .watermark, .number:
                     break
                 }
                 updateCanvasCursor(at: value.location)
@@ -697,7 +825,7 @@ struct AnnotationCanvas: View {
             OverlayCursor.pen(color: color, diameter: penStrokeWidth).set()
         case .watermark:
             NSCursor.arrow.set()
-        case .rect, .line, .arrow, .highlight, .mosaic, .blur:
+        case .rect, .line, .arrow, .highlight, .mosaic, .blur, .number:
             NSCursor.crosshair.set()
         }
     }
@@ -710,7 +838,8 @@ struct AnnotationCanvas: View {
         for item in controller.overlays.reversed() {
             guard let rect = toViewRect(item.visualRect(), fitted: fitted) else { continue }
             let padded = rect.insetBy(dx: -6, dy: -6)
-            if item.kind == .ellipse {
+            let circular = item.kind == .ellipse || (item.kind == .number && item.numberStyle.isCircular)
+            if circular {
                 if ellipseContains(point, in: padded) { return item }
             } else if padded.contains(point) {
                 return item

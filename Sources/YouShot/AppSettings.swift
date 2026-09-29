@@ -1,6 +1,7 @@
 import Foundation
 
 enum AppSettings {
+    private static let includeCursorKey = "settings.includeCursor"
     private static let blurSigmaKey = "settings.blurSigma"
     private static let blurFeatherKey = "settings.blurFeather"
     private static let windowSnapKey = "settings.windowSnap"
@@ -11,6 +12,7 @@ enum AppSettings {
     private static let strokeCustomHexKey = "settings.strokeCustomHex"
     private static let strokeWidthKey = "settings.strokeWidth"
     private static let rectShapeKey = "settings.rectShape"
+    private static let numberStyleKey = "settings.numberStyle"
     private static let textBackdropKey = "settings.textBackdrop"
     private static let textBackdropColorKey = "settings.textBackdropColorIndex"
     private static let textBackdropCustomHexKey = "settings.textBackdropCustomHex"
@@ -25,6 +27,15 @@ enum AppSettings {
     private static let watermarkOpacityKey = "settings.watermarkOpacity"
     private static let scrollStepRatioKey = "settings.scrollStepRatio"
     private static let scrollMaxHeightKey = "settings.scrollMaxHeight"
+
+    /// 未设置过时默认不把鼠标指针画进截图。
+    static var includeCursor: Bool {
+        get {
+            if UserDefaults.standard.object(forKey: includeCursorKey) == nil { return false }
+            return UserDefaults.standard.bool(forKey: includeCursorKey)
+        }
+        set { UserDefaults.standard.set(newValue, forKey: includeCursorKey) }
+    }
 
     static var blurSigma: Double {
         get {
@@ -109,6 +120,14 @@ enum AppSettings {
         set { UserDefaults.standard.set(newValue, forKey: strokeOpacityKey) }
     }
 
+    static var numberStyle: NumberBadgeStyle {
+        get {
+            let raw = UserDefaults.standard.string(forKey: numberStyleKey) ?? ""
+            return NumberBadgeStyle(rawValue: raw) ?? .filled
+        }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: numberStyleKey) }
+    }
+
     static var rectShape: RectShape {
         get {
             let raw = UserDefaults.standard.string(forKey: rectShapeKey) ?? ""
@@ -182,7 +201,7 @@ enum AppSettings {
         set { UserDefaults.standard.set(newValue, forKey: watermarkOpacityKey) }
     }
 
-    /// 每次自动滚动占选区高度的比例。保留足够重叠区域供 Vision 配准。
+    /// 每次自动滚动占选区高度的比例。保留足够重叠区域供逐行比对拼接。
     static var scrollStepRatio: Double {
         get {
             let value = UserDefaults.standard.object(forKey: scrollStepRatioKey) as? Double

@@ -113,7 +113,7 @@ final class AnnotationOverlay {
             OverlayCursor.pen(color: color, diameter: width).set()
         case .watermark:
             NSCursor.arrow.set()
-        case .rect, .line, .arrow, .highlight, .mosaic, .blur:
+        case .rect, .line, .arrow, .highlight, .mosaic, .blur, .number:
             NSCursor.crosshair.set()
         }
     }
@@ -199,6 +199,10 @@ struct AnnotationOverlayRoot: View {
                 .position(x: toolbarCenterX, y: toolbarCenterY)
                 .zIndex(5)
 
+            ScrollCaptureSideBar()
+                .offset(x: sideBarX, y: sideBarY)
+                .zIndex(5)
+
             if let toast = controller.overlayToast {
                 Text(toast)
                     .font(.system(size: 12, weight: .semibold))
@@ -261,6 +265,19 @@ struct AnnotationOverlayRoot: View {
             return above
         }
         return screenSize.height - 88
+    }
+
+    /// 按展开后的宽度判断，右侧放不下时收进选区右边缘内侧，展开时入口不跳位。
+    private var sideBarX: CGFloat {
+        let right = liveSelection.maxX + 10
+        if right + ScrollCaptureSideBar.expandedWidth <= screenSize.width - 8 {
+            return right
+        }
+        return max(8, liveSelection.maxX - ScrollCaptureSideBar.expandedWidth - 10)
+    }
+
+    private var sideBarY: CGFloat {
+        min(max(8, liveSelection.minY), screenSize.height - 64)
     }
 }
 

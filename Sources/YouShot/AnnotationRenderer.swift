@@ -8,6 +8,7 @@ enum EditorTool: String, CaseIterable, Identifiable {
     case arrow
     case pen
     case text
+    case number
     case highlight
     case mosaic
     case blur
@@ -22,6 +23,7 @@ enum EditorTool: String, CaseIterable, Identifiable {
         case .arrow: return "箭头"
         case .pen: return "画笔"
         case .text: return "文字"
+        case .number: return "序号"
         case .highlight: return "高亮"
         case .mosaic: return "马赛克"
         case .blur: return "模糊"
@@ -36,6 +38,7 @@ enum EditorTool: String, CaseIterable, Identifiable {
         case .arrow: return "arrow.up.right"
         case .pen: return "pencil.tip"
         case .text: return "textformat"
+        case .number: return "1.circle"
         case .highlight: return "sun.max.fill"
         case .mosaic: return "square.grid.3x3.fill"
         case .blur: return "drop.fill"
@@ -92,6 +95,79 @@ enum RectShape: String, CaseIterable, Identifiable {
         case .rounded: return "rectangle"
         case .ellipse: return "oval"
         }
+    }
+}
+
+enum NumberBadgeStyle: String, CaseIterable, Identifiable {
+    case filled
+    case ring
+    case square
+    case plain
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .filled: return "实心圆"
+        case .ring: return "白底圆"
+        case .square: return "方块"
+        case .plain: return "数字"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .filled: return "1.circle.fill"
+        case .ring: return "1.circle"
+        case .square: return "1.square.fill"
+        case .plain: return "textformat.123"
+        }
+    }
+
+    var isCircular: Bool {
+        self == .filled || self == .ring
+    }
+
+    static func ringWidth(for fontSize: CGFloat) -> CGFloat {
+        max(2, fontSize * 0.09)
+    }
+
+    func frame(center: CGPoint, text: String, fontSize: CGFloat) -> CGRect {
+        let font = NSFont.boldSystemFont(ofSize: max(fontSize, 1))
+        let textSize = (text as NSString).size(withAttributes: [.font: font])
+        switch self {
+        case .plain:
+            return CGRect(
+                x: center.x - textSize.width / 2,
+                y: center.y - textSize.height / 2,
+                width: max(textSize.width, 1),
+                height: max(textSize.height, 1)
+            )
+        case .filled, .ring, .square:
+            let pad = self == .square ? fontSize * 0.72 : fontSize * 0.62
+            let length = max(max(textSize.width, textSize.height) + pad, fontSize * 1.6)
+            return CGRect(
+                x: center.x - length / 2,
+                y: center.y - length / 2,
+                width: length,
+                height: length
+            )
+        }
+    }
+
+    func textColor(on fill: NSColor) -> NSColor {
+        switch self {
+        case .filled, .square:
+            return Self.contrasting(fill)
+        case .ring, .plain:
+            return fill
+        }
+    }
+
+    private static func contrasting(_ color: NSColor) -> NSColor {
+        guard let rgb = color.usingColorSpace(.sRGB) else { return .white }
+        let luminance = 0.299 * rgb.redComponent + 0.587 * rgb.greenComponent + 0.114 * rgb.blueComponent
+        return luminance > 0.72 ? .black : .white
     }
 }
 
@@ -174,11 +250,13 @@ struct OverlayItem: Identifiable {
     let fontSize: CGFloat
     let backdrop: TextBackdrop
     let backdropColor: NSColor
+    var numberStyle: NumberBadgeStyle = .filled
 
     enum OverlayKind {
         case roundedRect
         case ellipse
         case text
+        case number
     }
 
     static func shape(_ kind: OverlayKind, frame: CGRect, color: NSColor, lineWidth: CGFloat) -> OverlayItem {
@@ -217,9 +295,30 @@ struct OverlayItem: Identifiable {
         )
     }
 
+    static func number(
+        frame: CGRect,
+        text: String,
+        color: NSColor,
+        fontSize: CGFloat,
+        style: NumberBadgeStyle
+    ) -> OverlayItem {
+        OverlayItem(
+            id: UUID(),
+            kind: .number,
+            frame: frame,
+            color: color,
+            lineWidth: 0,
+            text: text,
+            fontSize: fontSize,
+            backdrop: .none,
+            backdropColor: .white,
+            numberStyle: style
+        )
+    }
+
     func visualRect() -> CGRect {
         switch kind {
-        case .roundedRect, .ellipse:
+        case .roundedRect, .ellipse, .number:
             return frame
         case .text:
             let textRect = CGRect(
@@ -245,6 +344,15 @@ struct OverlayItem: Identifiable {
                 fontSize: fontSize,
                 backdrop: backdrop,
                 backdropColor: backdropColor
+            )
+        case .number:
+            return AnnotationRenderer.drawNumber(
+                on: image,
+                text: text,
+                rect: frame,
+                color: color,
+                fontSize: fontSize,
+                style: numberStyle
             )
         }
     }
@@ -607,6 +715,63 @@ enum AnnotationRenderer {
             NSBezierPath(ovalIn: box).fill()
         case .rounded, .capsule, .banner:
             NSBezierPath(roundedRect: box, xRadius: radius, yRadius: radius).fill()
+        }
+    }
+
+    static func drawNumber(
+        on image: CGImage,
+        text: String,
+        rect: CGRect,
+        color: NSColor,
+        fontSize: CGFloat,
+        style: NumberBadgeStyle
+    ) -> CGImage? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return image }
+        return drawWithAppKit(on: image) { size in
+            let box = NSRect(
+                x: rect.minX,
+                y: size.height - rect.maxY,
+                width: rect.width,
+                height: rect.height
+            )
+            switch style {
+            case .filled:
+                color.setFill()
+                NSBezierPath(ovalIn: box).fill()
+            case .ring:
+                NSColor.white.withAlphaComponent(0.94).setFill()
+                NSBezierPath(ovalIn: box).fill()
+                color.setStroke()
+                let width = NumberBadgeStyle.ringWidth(for: fontSize)
+                let path = NSBezierPath(ovalIn: box.insetBy(dx: width / 2, dy: width / 2))
+                path.lineWidth = width
+                path.stroke()
+            case .square:
+                color.setFill()
+                let radius = box.width * 0.22
+                NSBezierPath(roundedRect: box, xRadius: radius, yRadius: radius).fill()
+            case .plain:
+                break
+            }
+            let font = NSFont.boldSystemFont(ofSize: fontSize)
+            var attrs: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: style.textColor(on: color),
+            ]
+            if style == .plain {
+                let shadow = NSShadow()
+                shadow.shadowColor = NSColor.black.withAlphaComponent(0.55)
+                shadow.shadowBlurRadius = max(1.5, fontSize * 0.16)
+                shadow.shadowOffset = NSSize(width: 0, height: -1)
+                attrs[.shadow] = shadow
+            }
+            let string = trimmed as NSString
+            let textSize = string.size(withAttributes: attrs)
+            string.draw(
+                at: NSPoint(x: box.midX - textSize.width / 2, y: box.midY - textSize.height / 2),
+                withAttributes: attrs
+            )
         }
     }
 
