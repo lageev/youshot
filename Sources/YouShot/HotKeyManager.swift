@@ -84,8 +84,14 @@ final class HotKeyManager: @unchecked Sendable {
                     nil,
                     &hotKeyID
                 )
-                Task { @MainActor in
-                    manager.handle(id: hotKeyID.id)
+                if Thread.isMainThread {
+                    MainActor.assumeIsolated {
+                        manager.handle(id: hotKeyID.id)
+                    }
+                } else {
+                    Task { @MainActor in
+                        manager.handle(id: hotKeyID.id)
+                    }
                 }
                 return noErr
             },

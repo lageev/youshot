@@ -1,12 +1,12 @@
 # YouShot
 
-YouShot 是一款原生 macOS 菜单栏截图工具。当前源码版本为 **1.1.0**（Bundle ID：`top.yayalu.youshot`）。它常驻菜单栏、不显示 Dock 图标，支持当前屏幕、全部屏幕、窗口吸附、自由区域和滚动长截图，并可以在截图原位置直接标注。
+YouShot 是一款原生 macOS 菜单栏截图工具。当前源码版本为 **1.1.1**（Bundle ID：`top.yayalu.youshot`）。它常驻菜单栏、不显示 Dock 图标，支持当前屏幕、全部屏幕、窗口吸附、自由区域和滚动长截图，并可以在截图原位置直接标注。
 
 截图使用 ScreenCaptureKit，按显示器原生像素输出无损 PNG。窗口吸附使用独立窗口采集，背景透明，并排除系统投影。
 
 - 官网：<https://youshot.yayalu.top>
 - 发布页：<https://github.com/lageev/youshot/releases>
-- 当前版本下载：[YouShot-1.1.0.zip](https://github.com/lageev/youshot/releases/download/v1.1.0/YouShot-1.1.0.zip)
+- 当前版本下载：[YouShot-1.1.1.zip](https://github.com/lageev/youshot/releases/download/v1.1.1/YouShot-1.1.1.zip)
 
 ## 功能
 
@@ -44,7 +44,7 @@ YouShot 是一款原生 macOS 菜单栏截图工具。当前源码版本为 **1.
 
 ## 安装
 
-下载 [YouShot-1.1.0.zip](https://github.com/lageev/youshot/releases/download/v1.1.0/YouShot-1.1.0.zip)，解压后打开 `YouShot.app`。应用启动后出现在菜单栏。
+下载 [YouShot-1.1.1.zip](https://github.com/lageev/youshot/releases/download/v1.1.1/YouShot-1.1.1.zip)，解压后打开 `YouShot.app`。应用启动后出现在菜单栏。
 
 已安装的版本可通过菜单栏「检查更新…」，或「设置 → 关于」中的自动检查、自动下载获取更新。更新源为 <https://youshot.yayalu.top/updates/appcast.xml>。
 
@@ -144,13 +144,13 @@ YouShot 的截图交互和鼠标指针处理参考了以下开源项目：
 
 ## English
 
-YouShot is a native macOS menu bar screenshot app. The source tree is version **1.1.0** (bundle ID `top.yayalu.youshot`). It stays in the menu bar, has no Dock icon, and captures the current display, every display, a snapped window, a free region, or a scrolling page. Region shots can be annotated in place.
+YouShot is a native macOS menu bar screenshot app. The source tree is version **1.1.1** (bundle ID `top.yayalu.youshot`). It stays in the menu bar, has no Dock icon, and captures the current display, every display, a snapped window, a free region, or a scrolling page. Region shots can be annotated in place.
 
 Captures use ScreenCaptureKit and are written as lossless PNGs at the display’s native pixel size. A snapped window is captured on its own, with a transparent background and without the system shadow.
 
 - Website: <https://youshot.yayalu.top>
 - Releases: <https://github.com/lageev/youshot/releases>
-- Current download: [YouShot-1.1.0.zip](https://github.com/lageev/youshot/releases/download/v1.1.0/YouShot-1.1.0.zip)
+- Current download: [YouShot-1.1.1.zip](https://github.com/lageev/youshot/releases/download/v1.1.1/YouShot-1.1.1.zip)
 
 ### Features
 
@@ -184,7 +184,7 @@ Automatic scrolling also needs **Accessibility**, because it posts scroll-wheel 
 
 ### Install
 
-Download [YouShot-1.1.0.zip](https://github.com/lageev/youshot/releases/download/v1.1.0/YouShot-1.1.0.zip), unzip it, and open `YouShot.app`. The app appears in the menu bar.
+Download [YouShot-1.1.1.zip](https://github.com/lageev/youshot/releases/download/v1.1.1/YouShot-1.1.1.zip), unzip it, and open `YouShot.app`. The app appears in the menu bar.
 
 Use **Check for Updates…** in the menu bar, or the controls under **Settings → About**. The update feed is <https://youshot.yayalu.top/updates/appcast.xml>.
 

@@ -1,10 +1,50 @@
 <?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
   <channel>
-    <title>YouShot</title>
+    <title>YouShot Updates</title>
     <link>https://youshot.yayalu.top/updates/appcast.xml</link>
-    <description>YouShot updates</description>
+    <description>YouShot 自分发更新</description>
     <language>zh-CN</language>
+<item>
+  <title>1.1.1</title>
+  <pubDate>Tue, 24 Nov 2026 17:36:53 +0800</pubDate>
+  <sparkle:version>4</sparkle:version>
+  <sparkle:shortVersionString>1.1.1</sparkle:shortVersionString>
+  <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+        <description><![CDATA[
+<h3>Changes</h3>
+<ul>
+  <li>选区面板不再抢占目标应用的 Key Window 焦点，避免原窗口失焦变灰或 Popover、下拉菜单、自动补全等悬浮 UI 自动关闭。</li>
+  <li>优化自动选窗口（窗口吸附）对悬浮 UI 的识别与截取：放宽窗口层级过滤以覆盖状态栏浮窗、菜单及自定义悬浮面板；所有悬浮层以及上方叠有悬浮子 UI 的窗口均从触发瞬间的冻结帧裁剪，不再因实时单窗口重拍而丢失悬浮层。</li>
+  <li>压缩快捷键触发到冻结帧的延迟：同步捕获触发瞬间的光标与窗口列表，多屏冻结改为并发采集，并移除零延迟模式下多余的 150ms 等待。</li>
+</ul>
+]]></description>
+  <enclosure
+    url="https://github.com/lageev/youshot/releases/download/v1.1.1/YouShot-1.1.1.zip"
+    sparkle:edSignature="WMeDiT4swQBvCZatCfNRRrHJ3A7vhAXPGiK8gcXBtrLz9sssXRy1eU83FRDG1pKDTG+NPo3Bc7lJBuEdiGv0Cw=="
+    length="3910153"
+    type="application/octet-stream"/>
+</item>
+<item>
+  <title>1.1.0</title>
+  <pubDate>Tue, 29 Sep 2026 16:14:41 +0800</pubDate>
+  <sparkle:version>3</sparkle:version>
+  <sparkle:shortVersionString>1.1.0</sparkle:shortVersionString>
+  <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+        <description><![CDATA[
+<h3>Changes</h3>
+<ul>
+  <li>新增滚动长截图。框选后可在选区右侧选择自动或手动滚动，逐行比对拼接，页面到底后自动停止；采集中可暂停、提前完成或取消，完成后能裁掉首尾。粘性顶栏、底部悬浮条、静止侧栏和滚动条不会在长图里重复出现。默认快捷键是 ⌥⇧⌘6。</li>
+  <li>标注工具栏可以快速插入序号，按点击顺序生成 1、2、3。样式有实心圆、白底圆、方块和纯数字。</li>
+  <li>截图默认不再包含鼠标指针，需要时可以在菜单栏或「设置 → 截图」中打开。</li>
+</ul>
+]]></description>
+  <enclosure
+    url="https://github.com/lageev/youshot/releases/download/v1.1.0/YouShot-1.1.0.zip"
+    sparkle:edSignature="m8YD0BjK3XhVGACG+hYBpXVGziQZ67hBu2yWzizQRM5vz1SC9Wt9bGd9rmg7pAyOvZsWzWEXaVSygiJ93HegCg=="
+    length="3882619"
+    type="application/octet-stream"/>
+</item>
 <item>
   <title>1.0.1</title>
   <pubDate>Tue, 01 Sep 2026 10:15:12 +0800</pubDate>
@@ -15,6 +55,18 @@
     url="https://github.com/lageev/youshot/releases/download/v1.0.1/YouShot-1.0.1.zip"
     sparkle:edSignature="b+HQ7sCZUseAeFtWAg5erjzcdx28ME4f3tpu8uPsuEfqn9uqDsxT6Pt8nZUHtU5ZNlJkMdQvWGn/NOKWXBc5AQ=="
     length="3642234"
+    type="application/octet-stream"/>
+</item>
+<item>
+  <title>1.0.0</title>
+  <pubDate>Tue, 01 Sep 2026 09:45:43 +0800</pubDate>
+  <sparkle:version>1</sparkle:version>
+  <sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>
+  <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+  <enclosure
+    url="https://github.com/lageev/youshot/releases/download/v1.0.0/YouShot-1.0.0.zip"
+    sparkle:edSignature="Y5I02pJj/6f9zL4JX0MN0CBgEt7XcCz62Daa8Lm+kBiqdTXsHf9Q73peWb64bFxEg5jyiw13eKIknENNED1FDQ=="
+    length="3699631"
     type="application/octet-stream"/>
 </item>
   </channel>

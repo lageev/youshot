@@ -40,11 +40,16 @@ final class RegionSelector {
 
     func pick(
         snapWindows: Bool,
+        snapWindowsList: [SnapWindowInfo]? = nil,
         frozenFrames: [CGDirectDisplayID: CGImage] = [:]
     ) async -> RegionSelection? {
         await withCheckedContinuation { continuation in
             self.continuation = continuation
-            present(snapWindows: snapWindows, frozenFrames: frozenFrames)
+            present(
+                snapWindows: snapWindows,
+                snapWindowsList: snapWindowsList,
+                frozenFrames: frozenFrames
+            )
         }
     }
 
@@ -66,9 +71,10 @@ final class RegionSelector {
 
     private func present(
         snapWindows: Bool,
+        snapWindowsList: [SnapWindowInfo]?,
         frozenFrames: [CGDirectDisplayID: CGImage]
     ) {
-        let snapList = snapWindows ? Self.collectSnapWindows() : []
+        let snapList = snapWindows ? (snapWindowsList ?? Self.collectSnapWindows()) : []
 
         for screen in NSScreen.screens {
             let displayID = UInt32(
@@ -130,27 +136,24 @@ final class RegionSelector {
             panel.invalidateCursorRects(for: overlay)
             panels.append(panel)
         }
-        // 选区层不激活应用，WindowServer 默认忽略后台应用的光标设置，
-        // 需开启该连接属性，否则要等按下鼠标后十字光标才生效。
+        // 选区层不激活应用，也不抢占 key window，避免原窗口失焦变灰或
+        // 悬浮 UI（Popover、下拉菜单、自动补全等）因 resignKey 自动关闭。
+        // WindowServer 默认忽略后台应用的光标设置，开启该连接属性即可在
+        // 不抢占焦点的前提下立即生效十字光标；取消操作由全局 Esc 热键处理。
         _ = CGSSetConnectionProperty(
             _CGSDefaultConnection(),
             _CGSDefaultConnection(),
             "SetsCursorInBackground" as CFString,
             kCFBooleanTrue
         )
-        // A non-activating panel can become key without taking focus from the
-        // app being captured. Making the panel under the pointer key gives
-        // WindowServer ownership of its cursor rect, while mouse-event updates
-        // below provide a fallback on the other displays.
         if let panel = panels.first(where: { $0.frame.contains(NSEvent.mouseLocation) }),
-           let overlay = panel.contentView {
-            panel.makeKeyAndOrderFront(nil)
-            panel.makeFirstResponder(overlay)
+           let overlay = panel.contentView as? RegionOverlayView {
             panel.invalidateCursorRects(for: overlay)
             NSCursor.crosshair.set()
+            if snapWindows {
+                overlay.refreshHoverForCurrentMouse()
+            }
         }
-        // 保持目标应用为前台：部分应用的设置面板会在失焦后自动关闭。
-        // key 的非激活面板仍可接收鼠标事件；取消操作由全局 Esc 热键处理。
     }
 
     private func finish(_ selection: RegionSelection?) {
@@ -171,28 +174,27 @@ final class RegionSelector {
             .integral
     }
 
-    private static func collectSnapWindows() -> [SnapWindowInfo] {
+    static func collectSnapWindows() -> [SnapWindowInfo] {
         let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
         guard let infoList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
             return []
         }
 
-        let selectableLayers = Set([
-            CGWindowLevelForKey(.normalWindow),
-            CGWindowLevelForKey(.floatingWindow),
-            CGWindowLevelForKey(.modalPanelWindow),
-            CGWindowLevelForKey(.utilityWindow),
-            CGWindowLevelForKey(.popUpMenuWindow),
-        ].map(Int.init))
+        let normalLayer = Int(CGWindowLevelForKey(.normalWindow))
+        let maxSelectableLayer = Int(CGWindowLevelForKey(.popUpMenuWindow)) + 20
         let primaryScreenArea = NSScreen.screens.first.map {
             $0.frame.width * $0.frame.height
         } ?? 0
 
         var result: [SnapWindowInfo] = []
+        // infoList 按从前到后（Z 序由高到低）排列，用于判断普通窗口上方是否叠有
+        // 悬浮 UI（Popover、菜单、Tooltip 等）或其他窗口。
+        var occludingFrames: [CGRect] = []
         for info in infoList {
             guard let number = (info[kCGWindowNumber as String] as? NSNumber)?.uint32Value else { continue }
             guard let layer = info[kCGWindowLayer as String] as? Int,
-                  selectableLayers.contains(layer)
+                  layer >= normalLayer,
+                  layer <= maxSelectableLayer
             else { continue }
             let alpha = (info[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1
             guard alpha > 0.05 else { continue }
@@ -204,7 +206,7 @@ final class RegionSelector {
             let w = (bounds["Width"] as? NSNumber)?.doubleValue ?? 0
             let h = (bounds["Height"] as? NSNumber)?.doubleValue ?? 0
             guard w >= 8, h >= 8 else { continue }
-            // 输入法背景等 WindowServer 高层透明面可能覆盖近乎整屏，若参与
+            // 输入法背景、Dock 全屏辅助层等高层透明面可能覆盖近乎整屏，若参与
             // 命中测试会挡住其下方真正需要选择的窗口。
             if layer >= 20, primaryScreenArea > 0, w * h > primaryScreenArea * 0.8 {
                 continue
@@ -214,9 +216,13 @@ final class RegionSelector {
             let cocoa = cocoaFrame(fromQuartz: quartz)
             let title = info[kCGWindowName as String] as? String
             let label = (title?.isEmpty == false) ? (title ?? owner) : owner
-            // Popup-menu 等高层窗口通常带有透明/模糊背景，并且会在失焦时
-            // 立即销毁。它们必须从触发瞬间的整屏合成帧裁剪。
-            let captureWindowID = layer >= 20 ? nil : number
+            // 1. 所有 layer > normalWindow 的悬浮面板/Popover/菜单都可能依赖屏幕合成
+            //    背景或在交互中失焦销毁，必须从触发瞬间的整屏冻结帧裁剪。
+            // 2. 普通窗口若上方叠有其他可见窗口/悬浮子 UI，单独按 windowID 采集会
+            //    把上方的悬浮 UI 剥离掉，此时同样回退到冻结帧裁剪以保留完整画面。
+            let isOccludedByFrontWindow = occludingFrames.contains { $0.intersects(cocoa) }
+            let captureWindowID: CGWindowID? = (layer == normalLayer && !isOccludedByFrontWindow) ? number : nil
+            occludingFrames.append(cocoa)
             result.append(
                 SnapWindowInfo(
                     id: number,
@@ -428,6 +434,12 @@ private final class RegionOverlayView: NSView {
         onSelection?(nil, nil)
     }
 
+    func refreshHoverForCurrentMouse() {
+        guard snapEnabled, !isDragging, startPoint == nil, let window else { return }
+        let local = window.convertPoint(fromScreen: NSEvent.mouseLocation)
+        updateHover(at: local)
+    }
+
     private func updateHover(at localPoint: CGPoint) {
         guard let window else {
             hoverWindow = nil
@@ -489,9 +501,9 @@ private final class RegionOverlayView: NSView {
 }
 
 private final class RegionSelectionPanel: NSPanel {
-    /// 保留非激活面板接收鼠标事件的资格；是否实际成为 key 由
-    /// `becomesKeyOnlyIfNeeded` + `needsPanelToBecomeKey` 控制。
-    override var canBecomeKey: Bool { true }
+    /// 绝不抢占目标应用的 key window，避免原窗口失焦变灰或悬浮 UI 自动关闭。
+    /// 鼠标事件由 `acceptsFirstMouse` + `.activeAlways` 追踪区接收，Esc 由全局热键处理。
+    override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 }
 

@@ -307,8 +307,18 @@ final class CaptureController: ObservableObject {
         statusMessage = nil
         setBusy(true)
         let captureMode = mode
+        // 在任何异步跳转之前同步捕获触发瞬间的光标和窗口 Z 序快照，
+        // 避免悬浮 UI 在 Task 调度或 ScreenCaptureKit IPC 期间消失。
+        let initialCursor = (captureMode == .region || captureMode == .scroll) ? captureCursorSnapshot() : nil
+        let initialSnapWindows = (captureMode == .region || captureMode == .scroll) && windowSnapEnabled
+            ? RegionSelector.collectSnapWindows()
+            : []
         captureTask = Task { [weak self] in
-            await self?.runCapture(mode: captureMode)
+            await self?.runCapture(
+                mode: captureMode,
+                initialCursor: initialCursor,
+                initialSnapWindows: initialSnapWindows
+            )
         }
     }
 
@@ -794,7 +804,11 @@ final class CaptureController: ObservableObject {
 
     // MARK: - Capture flow
 
-    private func runCapture(mode: CaptureMode) async {
+    private func runCapture(
+        mode: CaptureMode,
+        initialCursor: CursorSnapshot? = nil,
+        initialSnapWindows: [SnapWindowInfo]? = nil
+    ) async {
         do {
             let results: [CaptureResult]
             switch mode {
@@ -807,9 +821,13 @@ final class CaptureController: ObservableObject {
             case .region, .scroll:
                 // 在任何选区面板出现前冻结所有屏幕。菜单、Popover、Spotlight、
                 // Raycast 等失焦即消失的界面仍会留在冻结帧里供选择和裁剪。
-                let context = try await makeRegionCaptureContext()
+                let context = try await makeRegionCaptureContext(
+                    initialCursor: initialCursor,
+                    initialSnapWindows: initialSnapWindows
+                )
                 guard let selection = await regionSelector.pick(
                     snapWindows: windowSnapEnabled,
+                    snapWindowsList: context.snapWindows,
                     frozenFrames: context.frames
                 ) else {
                     throw CancellationError()
@@ -1201,13 +1219,12 @@ final class CaptureController: ObservableObject {
     }
 
     private func runDelay(on screen: NSScreen) async throws {
-        if delaySeconds > 0 {
-            for remaining in stride(from: delaySeconds, through: 1, by: -1) {
-                try Task.checkCancellation()
-                remainingSeconds = remaining
-                hud.show(seconds: remaining, on: screen)
-                try await Task.sleep(for: .seconds(1))
-            }
+        guard delaySeconds > 0 else { return }
+        for remaining in stride(from: delaySeconds, through: 1, by: -1) {
+            try Task.checkCancellation()
+            remainingSeconds = remaining
+            hud.show(seconds: remaining, on: screen)
+            try await Task.sleep(for: .seconds(1))
         }
         try Task.checkCancellation()
         remainingSeconds = 0
@@ -1366,27 +1383,52 @@ final class CaptureController: ObservableObject {
     }
 
     /// 触发瞬间建立区域截图上下文。必须在选区面板创建前执行，避免临时窗口
-    /// 因 key window 或鼠标点击变化而消失。单屏失败不会拖累其他显示器，选中
-    /// 缺失帧的屏幕时会回退到常规实时采集。
-    private func makeRegionCaptureContext() async throws -> RegionCaptureContext {
-        let cursor = captureCursorSnapshot()
+    /// 因 key window 或鼠标点击变化而消失。多屏并发采集以压缩触发到冻结之间的时间窗；
+    /// 单屏失败不会拖累其他显示器，选中缺失帧的屏幕时会回退到常规实时采集。
+    private func makeRegionCaptureContext(
+        initialCursor: CursorSnapshot? = nil,
+        initialSnapWindows: [SnapWindowInfo]? = nil
+    ) async throws -> RegionCaptureContext {
+        let cursor = initialCursor ?? captureCursorSnapshot()
+        let snapWindows = initialSnapWindows ?? (windowSnapEnabled ? RegionSelector.collectSnapWindows() : [])
         let content = try await shareableContent(onScreenWindowsOnly: true)
-        var frames: [CGDirectDisplayID: CGImage] = [:]
 
-        for screen in NSScreen.screens {
-            try Task.checkCancellation()
+        let captureTasks: [(CGDirectDisplayID, Task<CGImage?, Never>)] = NSScreen.screens.compactMap { screen in
             let id = displayID(of: screen)
-            guard let display = content.displays.first(where: { $0.displayID == id }) else { continue }
-            if let image = try? await captureImage(
+            guard let display = content.displays.first(where: { $0.displayID == id }) else { return nil }
+            let (filter, config) = makeCaptureRequest(
                 display: display,
                 content: content,
                 sourceRect: nil,
                 showsCursor: false
-            ) {
+            )
+            let task = Task { @MainActor in
+                try? await SCScreenshotManager.captureImage(
+                    contentFilter: filter,
+                    configuration: config
+                )
+            }
+            return (id, task)
+        }
+        defer {
+            for (_, task) in captureTasks {
+                task.cancel()
+            }
+        }
+
+        var frames: [CGDirectDisplayID: CGImage] = [:]
+        for (id, task) in captureTasks {
+            try Task.checkCancellation()
+            if let image = await task.value {
                 frames[id] = image
             }
         }
-        return RegionCaptureContext(content: content, frames: frames, cursor: cursor)
+        return RegionCaptureContext(
+            content: content,
+            frames: frames,
+            cursor: cursor,
+            snapWindows: snapWindows
+        )
     }
 
     private func capture(
@@ -1430,12 +1472,12 @@ final class CaptureController: ObservableObject {
         )
     }
 
-    private func captureImage(
+    private func makeCaptureRequest(
         display: SCDisplay,
         content: SCShareableContent,
         sourceRect: CGRect?,
         showsCursor: Bool? = nil
-    ) async throws -> CGImage {
+    ) -> (SCContentFilter, SCStreamConfiguration) {
         // 排除 YouShot 自己的截图遮罩/HUD/标注层，但把当前可见的正常设置窗口加回。
         // 这样既不会把操作层截进去，也能对 YouShot 设置页做整屏、区域或窗口截图。
         let ownBundleIDs = Set(
@@ -1478,7 +1520,21 @@ final class CaptureController: ObservableObject {
         config.pixelFormat = kCVPixelFormatType_32BGRA
         config.captureResolution = .best
         config.minimumFrameInterval = CMTime(value: 1, timescale: 1)
+        return (filter, config)
+    }
 
+    private func captureImage(
+        display: SCDisplay,
+        content: SCShareableContent,
+        sourceRect: CGRect?,
+        showsCursor: Bool? = nil
+    ) async throws -> CGImage {
+        let (filter, config) = makeCaptureRequest(
+            display: display,
+            content: content,
+            sourceRect: sourceRect,
+            showsCursor: showsCursor
+        )
         return try await SCScreenshotManager.captureImage(
             contentFilter: filter,
             configuration: config
@@ -1606,6 +1662,7 @@ private struct RegionCaptureContext {
     let content: SCShareableContent
     let frames: [CGDirectDisplayID: CGImage]
     let cursor: CursorSnapshot?
+    let snapWindows: [SnapWindowInfo]
 }
 
 private struct RegionCaptureBundle {
