@@ -7,7 +7,7 @@
     <language>zh-CN</language>
 <item>
   <title>1.1.1</title>
-  <pubDate>Wed, 25 Nov 2026 13:41:03 +0800</pubDate>
+  <pubDate>Wed, 25 Nov 2026 15:43:11 +0800</pubDate>
   <sparkle:version>4</sparkle:version>
   <sparkle:shortVersionString>1.1.1</sparkle:shortVersionString>
   <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
@@ -21,8 +21,8 @@
 ]]></description>
   <enclosure
     url="https://github.com/lageev/youshot/releases/download/v1.1.1/YouShot-1.1.1.zip"
-    sparkle:edSignature="rjx8CbFo37xFFMwEk2tNMIhtdSPAHYOOyOE11UppzJNrsIW1ABlAORjRLx7YozWOl48YKdxfsHP8gouSoNeDBg=="
-    length="3910174"
+    sparkle:edSignature="6DV0xI9QYO9SRCL5iKk30fNtEl0GQKyxjomIebTv9AjADXZJE26qQj7ly4FMW+xOZ47/EZ7HHZRnhiRsaRD8Bg=="
+    length="3891280"
     type="application/octet-stream"/>
 </item>
 <item>
